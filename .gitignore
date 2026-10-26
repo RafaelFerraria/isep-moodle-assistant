@@ -1,0 +1,24 @@
+# Credenciais e estado local — NUNCA fazer commit
+config.json
+!config.example.json
+token.txt
+token_cache.bin
+last_run.json
+Session/
+_temp_*.txt
+_test_*.txt
+
+# Logs e estado do sincronizador
+*.log
+sync_log.txt
+new_files.jsonl
+sync.lock
+
+# Dependências / cache
+node_modules/
+__pycache__/
+*.pyc
+
+# Ficheiros descarregados do Moodle
+Moodle_ISEP/
+*.tmp

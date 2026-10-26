@@ -1,0 +1,7 @@
+{
+    "username": "o-teu-numero-mecanografico",
+    "encrypted_password": "(gerado pelo configurar.bat com Windows DPAPI)",
+    "download_dir": "C:\Users\<utilizador>\Downloads\Moodle_ISEP",
+    "run_after_hour": 18,
+    "last_sync_date": ""
+}

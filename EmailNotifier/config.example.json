@@ -1,0 +1,9 @@
+{
+    "email_method": "thunderbird",
+    "email_address": "numero@isep.ipp.pt",
+    "scheduled_time": "18:00",
+    "session_mnemonic": "(gerado pelo assistente: bot do Session)",
+    "session_recipients": ["05<o-teu-Session-ID-com-66-caracteres>"],
+    "moodle_sync_dir": "C:\caminho\para\isep-moodle-assistant\MoodleSync",
+    "moodle_download_dir": "C:\Users\<utilizador>\Downloads\Moodle_ISEP"
+}
