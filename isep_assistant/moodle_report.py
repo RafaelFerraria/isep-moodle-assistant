@@ -6,7 +6,7 @@ import datetime
 from collections import OrderedDict
 from typing import List, Dict, Any
 
-from summarizer import short_course, first_sentences, norm
+from .summarizer import short_course, first_sentences, norm
 
 # (tipo, palavras-chave no nome do ficheiro/secção) por ordem de prioridade
 KINDS = [

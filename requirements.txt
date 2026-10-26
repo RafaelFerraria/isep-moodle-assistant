@@ -1,4 +1,8 @@
+# Sincronizador do Moodle
 requests>=2.31
 beautifulsoup4>=4.12
 # Opcional: ler o texto dos PDFs novos para o resumo (deteta prazos e título)
 pypdf>=4.0
+# API local (interface gráfica)
+fastapi>=0.110,<1
+uvicorn>=0.29

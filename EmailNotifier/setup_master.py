@@ -11,29 +11,19 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
 ROOT_DIR = os.path.dirname(BASE_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
-RUNNER_BAT = os.path.join(ROOT_DIR, "executar_notificador.bat")
 SESSION_SCRIPT = os.path.join(BASE_DIR, "session_sender.cjs")
 
-from summarizer import summarize_emails
+from isep_assistant import system
+from isep_assistant.summarizer import summarize_emails
 
 def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
-def find_thunderbird_path():
-    candidates = [
-        os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Mozilla Thunderbird", "thunderbird.exe"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"), "Mozilla Thunderbird", "thunderbird.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Thunderbird", "thunderbird.exe"),
-    ]
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
-    return None
+find_thunderbird_path = system.find_thunderbird_path
 
 def install_thunderbird_if_needed():
     tb_path = find_thunderbird_path()
@@ -85,39 +75,8 @@ def install_thunderbird_if_needed():
 
 def register_windows_tasks(scheduled_time: str):
     print(f"\nA configurar o Agendador de Tarefas do Windows para as {scheduled_time} e ao ligar o PC...")
-
-    # Script PowerShell para criar ambas as tarefas sem problemas de espacos no caminho
-    ps_cmd = f"""
-    $ErrorActionPreference = 'Stop'
-    $workDir = Split-Path "{RUNNER_BAT}"
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive
-
-    # O PC costuma estar em suspensao a hora agendada (WakeToRun nao o acorda), por isso
-    # a tarefa diaria tambem dispara ao retomar da suspensao (Power-Troubleshooter, evento 1).
-    $triggerDaily = New-ScheduledTaskTrigger -Daily -At "{scheduled_time}"
-    $evClass = Get-CimClass -Namespace Root/Microsoft/Windows/TaskScheduler -ClassName MSFT_TaskEventTrigger
-    $triggerResume = New-CimInstance -CimClass $evClass -ClientOnly
-    $triggerResume.Enabled = $true
-    $triggerResume.Delay = 'PT1M'
-    $triggerResume.Subscription = '<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'
-    $actionDaily = New-ScheduledTaskAction -Execute "{RUNNER_BAT}" -WorkingDirectory $workDir
-    $settingsDaily = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -WakeToRun -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName "ISEP_Email_Session_Daily" -Trigger @($triggerDaily, $triggerResume) -Action $actionDaily -Settings $settingsDaily -Principal $principal -Force
-
-    $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\\$env:USERNAME"
-    $triggerLogon.Delay = 'PT1M'
-    $actionLogon = New-ScheduledTaskAction -Execute "{RUNNER_BAT}" -WorkingDirectory $workDir
-    $settingsLogon = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName "ISEP_Email_Session_OnLogon" -Trigger $triggerLogon -Action $actionLogon -Settings $settingsLogon -Principal $principal -Force
-    """
-    try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], check=True, capture_output=True, text=True)
-        print(f"✅ Tarefa diária das {scheduled_time} (e ao retomar da suspensão) registada com sucesso!")
-        print("✅ Tarefa ao iniciar sessão (após ligar o PC) registada com sucesso!")
-    except subprocess.CalledProcessError as e:
-        print(f"Aviso no registo das tarefas agendadas: {e.stderr or e.stdout or e}")
-    except Exception as e:
-        print(f"Aviso no registo das tarefas agendadas: {e}")
+    ok, message = system.register_tasks(scheduled_time)
+    print(("✅ " if ok else "Aviso no registo das tarefas agendadas: ") + message)
 
 def send_test_summary(config: dict):
     print("\n" + "="*65)
@@ -184,7 +143,7 @@ def send_test_summary(config: dict):
         except Exception:
             pass
 
-from ai_summarizer import describe
+from isep_assistant.ai_summarizer import describe
 
 
 def main():

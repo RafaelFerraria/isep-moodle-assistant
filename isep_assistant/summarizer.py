@@ -319,10 +319,19 @@ def summarize_emails(emails: List[Dict[str, Any]], config: Dict[str, Any],
         return "📬 ISEP: sem emails novos nem ficheiros novos no Moodle desde a última verificação."
     if (config.get("summary_mode") or "rules").lower() == "ai":
         try:
-            from ai_summarizer import summarize_with_ai
+            from .ai_summarizer import summarize_with_ai
             now = datetime.datetime.now()
             return summarize_with_ai(emails, config, moodle_lines, f"{DIAS_SEMANA[now.weekday()]} {now:%d/%m/%Y %H:%M}")
         except Exception as err:  # nunca deixar o resumo diário por enviar por causa da IA
             note = f"\n\n⚠️ IA indisponível ({norm(str(err))[:140]}); resumo gerado por regras."
             return build_summary(emails, moodle_lines) + note
     return build_summary(emails, moodle_lines)
+
+
+# Emails fictícios para testar a ligação à IA / pré-visualizar o formato sem ler a caixa de correio
+SAMPLE_EMAILS = [
+    {"subject": "Data limite em amanhã às 23:59: Sprint 2 - Entrega", "sender": "Moodle ISEP (via MoodleISEP)",
+     "received_time": "", "body": "Olá, o trabalho Sprint 2 na disciplina LAPR3 atingirá a data limite brevemente."},
+    {"subject": "Aula de substituição de ESINF", "sender": "Docente ESINF",
+     "received_time": "", "body": "A aula de quinta-feira passa para a sala F105, às 10h."},
+]

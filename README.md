@@ -113,11 +113,36 @@ Teste manual: `MoodleSync\sincronizar_agora.bat` e `EmailNotifier\executar_notif
 ## Estrutura
 
 ```
-MoodleSync/      moodle_sync.py, configurar.bat, sincronizar_agora.bat
-EmailNotifier/   main.py, mail_fetcher.py, summarizer.py (regras), ai_summarizer.py (IA),
-                 configurar_resumo.py/.bat (escolher/alterar o modo), moodle_report.py,
-                 session_sender.cjs (envio via Session), assistentes de configuração
+isep_assistant/     NÚCLEO (Python): lógica partilhada pelos scripts, pelo agendador e pela API
+  digest.py           resumo diário (emails + Moodle -> resumo -> Session)
+  summarizer.py       resumo por regras      ai_summarizer.py   resumo por IA (CLI / API)
+  moodle_sync.py      sincronizador          moodle_report.py   análise dos ficheiros novos
+  mail_fetcher.py     leitura de emails      session.py         envio para o Session
+  config_store.py     configuração + validação (segredos só de escrita)
+  history.py          histórico de execuções system.py          Agendador do Windows, Thunderbird, rede
+  service.py          operações de alto nível usadas pela API
+  api/                API HTTP local (FastAPI) — ver docs/API.md
+MoodleSync/         configurar.bat, sincronizar_agora.bat, moodle_sync.py (atalho para o núcleo)
+EmailNotifier/      main.py (atalho para o núcleo), session_sender.cjs, assistentes de configuração
+                    (setup_master, configurar_resumo, …)
+tests/              testes automáticos (pytest)
+docs/API.md         contrato da API local
 CONFIGURAR_TUDO.bat
+```
+
+## API local e testes
+
+O núcleo expõe uma API HTTP local (só `127.0.0.1`, com token) para uma interface gráfica gerir estado, definições, tarefas e histórico:
+
+```bat
+python -m isep_assistant.api.server
+```
+
+Contrato e segurança em [docs/API.md](docs/API.md). Testes:
+
+```bat
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 ## Licença

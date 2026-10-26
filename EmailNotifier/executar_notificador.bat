@@ -33,5 +33,6 @@ if not defined PY_CMD (
 
 if not defined PY_CMD set "PY_CMD=python"
 
-"%PY_CMD%" main.py >> notifier.log 2>&1
+rem o main.py ja escreve em notifier.log; so os erros nao tratados (stderr) vao para la tambem
+"%PY_CMD%" main.py >nul 2>> notifier.log
 endlocal

@@ -9,7 +9,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-from mail_fetcher import get_emails
+ROOT_DIR_BOOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR_BOOT not in sys.path:
+    sys.path.insert(0, ROOT_DIR_BOOT)
+from isep_assistant.mail_fetcher import get_emails
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")

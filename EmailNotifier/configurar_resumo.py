@@ -12,8 +12,11 @@ import datetime
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from ai_summarizer import API_DEFAULTS, CLI_PRESETS, describe
-from summarizer import summarize_emails
+ROOT_DIR_BOOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR_BOOT not in sys.path:
+    sys.path.insert(0, ROOT_DIR_BOOT)
+from isep_assistant.ai_summarizer import API_DEFAULTS, CLI_PRESETS, describe
+from isep_assistant.summarizer import summarize_emails, SAMPLE_EMAILS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -30,14 +33,6 @@ API_LABELS = {
     "gemini": "Google (Gemini API)",
     "openai_compatible": "Outra API compatível com OpenAI (URL à escolha)",
 }
-
-SAMPLE_EMAILS = [
-    {"subject": "Data limite em amanhã às 23:59: Sprint 2 - Entrega", "sender": "Moodle ISEP (via MoodleISEP)",
-     "received_time": "", "body": "Olá, o trabalho Sprint 2 na disciplina LAPR3 atingirá a data limite brevemente."},
-    {"subject": "Aula de substituição de ESINF", "sender": "Docente ESINF",
-     "received_time": "", "body": "A aula de quinta-feira passa para a sala F105, às 10h."},
-]
-
 
 def ask_choice(title: str, options: dict, default: str) -> str:
     keys = list(options)
