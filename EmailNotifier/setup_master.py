@@ -184,6 +184,9 @@ def send_test_summary(config: dict):
         except Exception:
             pass
 
+from ai_summarizer import describe
+
+
 def main():
     clear_screen()
     print("=" * 70)
@@ -205,7 +208,7 @@ def main():
     print()
     print("🛣️ ROTEIRO DOS PROCEDIMENTOS QUE VAMOS SEGUIR (TUDO AUTOMATIZADO):")
     print("----------------------------------------------------------------------")
-    print("  [Passo 1] Pedir os teus dados logo no início (Email, Hora, Session ID).")
+    print("  [Passo 1] Pedir os teus dados logo no início (Email, Hora, Session ID, modo de resumo).")
     print("  [Passo 2] Verificar e instalar automaticamente o Mozilla Thunderbird.")
     print("  [Passo 3] Abrir o Thunderbird para ligares a tua conta (login único).")
     print("  [Passo 4] Criar as tarefas automáticas no Agendador do Windows.")
@@ -278,6 +281,10 @@ def main():
             config["session_recipients"] = [final_session]
             break
         print("⚠️ Session ID inválido! O teu Session ID deve conter 66 caracteres e começar por '05'.")
+
+    # 4. Modo de resumo (regras locais ou IA) — pode ser alterado depois com configurar_resumo.bat
+    from configurar_resumo import configure_summary
+    configure_summary(config)
 
     config["email_method"] = "thunderbird"
     # Integração com o MoodleSync (pasta irmã): o resumo diário inclui o que foi descarregado
@@ -361,6 +368,7 @@ def main():
     print(f"• Hora de Envio Diário : Todos os dias às {config['scheduled_time']}")
     print(f"• Arranque do PC      : Envia também sempre que ligares o computador")
     print(f"• Destino no Session  : {config['session_group_id']}")
+    print(f"• Modo de resumo      : {describe(config)}  (mudar: configurar_resumo.bat)")
     print("=" * 70)
     print("\nPodes fechar esta janela. O sistema tratará de tudo automaticamente!")
     print()

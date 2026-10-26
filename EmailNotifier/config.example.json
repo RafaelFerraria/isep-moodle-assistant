@@ -4,6 +4,23 @@
     "scheduled_time": "18:00",
     "session_mnemonic": "(gerado pelo assistente: bot do Session)",
     "session_recipients": ["05<o-teu-Session-ID-com-66-caracteres>"],
-    "moodle_sync_dir": "C:\caminho\para\isep-moodle-assistant\MoodleSync",
-    "moodle_download_dir": "C:\Users\<utilizador>\Downloads\Moodle_ISEP"
+    "moodle_sync_dir": "C:/caminho/para/isep-moodle-assistant/MoodleSync",
+    "moodle_download_dir": "C:/Users/<utilizador>/Downloads/Moodle_ISEP",
+
+    "summary_mode": "rules",
+
+    "_exemplo_ia_com_cli": {
+        "summary_mode": "ai",
+        "ai_provider": "cli",
+        "ai_cli": "claude | gemini | codex | custom",
+        "ai_cli_command": "(só para custom, ex.: meu-comando -p)"
+    },
+    "_exemplo_ia_com_api": {
+        "summary_mode": "ai",
+        "ai_provider": "api",
+        "ai_api_type": "openai | anthropic | gemini | openai_compatible",
+        "ai_model": "gpt-4o-mini",
+        "ai_api_key": "(opcional: ou usa a variável OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY)",
+        "ai_base_url": "(só para openai_compatible)"
+    }
 }

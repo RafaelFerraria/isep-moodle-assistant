@@ -311,7 +311,18 @@ def build_summary(emails: List[Dict[str, Any]], moodle_lines: Optional[List[str]
 
 def summarize_emails(emails: List[Dict[str, Any]], config: Dict[str, Any],
                      moodle_lines: Optional[List[str]] = None) -> str:
-    """Resumo agrupado por assunto: prazos, avisos, novidades do Moodle, faltas, helpdesk e outros."""
+    """Resumo por regras (local) ou, se config["summary_mode"] == "ai", reescrito por uma IA.
+
+    Se a IA falhar (CLI sem login, token inválido, sem rede), cai para o resumo por regras e avisa no fim.
+    """
     if not emails and not moodle_lines:
         return "📬 ISEP: sem emails novos nem ficheiros novos no Moodle desde a última verificação."
+    if (config.get("summary_mode") or "rules").lower() == "ai":
+        try:
+            from ai_summarizer import summarize_with_ai
+            now = datetime.datetime.now()
+            return summarize_with_ai(emails, config, moodle_lines, f"{DIAS_SEMANA[now.weekday()]} {now:%d/%m/%Y %H:%M}")
+        except Exception as err:  # nunca deixar o resumo diário por enviar por causa da IA
+            note = f"\n\n⚠️ IA indisponível ({norm(str(err))[:140]}); resumo gerado por regras."
+            return build_summary(emails, moodle_lines) + note
     return build_summary(emails, moodle_lines)

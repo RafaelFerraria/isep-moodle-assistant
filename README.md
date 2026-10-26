@@ -49,6 +49,22 @@ Em vez de despejar frases cortadas dos emails, o resumo agrupa e interpreta:
 - **Novo no Moodle**: tipo de cada ficheiro (enunciado, ficha, slides, avaliação…) e, se tiver `pypdf`, uma pista do conteúdo (prazo mencionado ou primeira linha).
 - **Faltas**, **Helpdesk** (um item por pedido, não por email) e **outros**.
 
+## Dois modos de resumo
+
+Escolhes na instalação e podes mudar quando quiseres com `EmailNotifier\configurar_resumo.bat`.
+
+| Modo | Como funciona | Privacidade |
+|---|---|---|
+| **Regras** (predefinido) | Classifica e agrupa os emails localmente (prazos, avisos, faltas, helpdesk…). Sem dependências nem custos. | Os emails não saem do teu PC. |
+| **IA** | Um modelo reescreve o resumo de forma mais natural e junta/interpreta melhor os emails. | O assunto e o início do texto dos emails são enviados ao fornecedor escolhido. |
+
+No modo **IA** ligas o modelo de uma de duas formas:
+
+- **CLI com a tua conta (sem token):** usa uma ferramenta de linha de comandos onde já fizeste login — `claude` (Claude Code), `gemini` (Gemini CLI / Antigravity, conta Google), `codex` (conta ChatGPT/OpenAI) — ou qualquer outro comando que leia o prompt por *stdin* (modo `custom`).
+- **Token de API:** OpenAI, Anthropic, Google Gemini ou qualquer API compatível com OpenAI. O token pode ficar numa variável de ambiente (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, recomendado) ou em `config.json` (ficheiro local, fora do git).
+
+Se a IA falhar (sem rede, login expirado, token inválido, limite de uso), o resumo diário **não deixa de ser enviado**: cai para o modo Regras e avisa no fim da mensagem. As mensagens de erro nunca incluem o token.
+
 ## Como funciona
 
 ```
@@ -67,6 +83,7 @@ Thunderbird (emails ISEP) ─────────────────►
 - Python 3.9+ e Node.js 18+ (o `CONFIGURAR_TUDO.bat` instala-os se faltarem)
 - [Mozilla Thunderbird](https://www.thunderbird.net) com a conta `@isep.ipp.pt` configurada
 - Uma conta [Session](https://getsession.org) para receber o resumo
+- *(Opcional, modo IA)* uma CLI com login (`claude`, `gemini`, `codex`) ou um token de API
 
 ## Instalação
 
@@ -82,7 +99,7 @@ MoodleSync\configurar.bat
 CONFIGURAR_TUDO.bat
 ```
 
-O assistente cria `EmailNotifier\config.json` (ver `config.example.json`). Para o resumo incluir o Moodle, define lá `moodle_sync_dir` e `moodle_download_dir` — o assistente preenche `moodle_sync_dir` automaticamente quando as duas pastas estão lado a lado.
+O assistente pergunta também o **modo de resumo** (Regras ou IA) e cria `EmailNotifier\config.json` (ver `config.example.json`). Para mudar o modo mais tarde, corre `EmailNotifier\configurar_resumo.bat`. Para o resumo incluir o Moodle, define lá `moodle_sync_dir` e `moodle_download_dir` — o assistente preenche `moodle_sync_dir` automaticamente quando as duas pastas estão lado a lado.
 
 Teste manual: `MoodleSync\sincronizar_agora.bat` e `EmailNotifier\executar_notificador.bat`.
 
@@ -90,14 +107,15 @@ Teste manual: `MoodleSync\sincronizar_agora.bat` e `EmailNotifier\executar_notif
 
 - Nada sensível vai para o repositório: `config.json`, palavras-passe, *mnemonic* do Session, logs e o estado local estão no `.gitignore`.
 - A palavra-passe do Moodle fica cifrada com a conta Windows (DPAPI) — só o teu utilizador a consegue decifrar.
-- Todo o processamento é local; o único envio externo é a mensagem para o teu Session.
+- No modo **Regras** todo o processamento é local e o único envio externo é a mensagem para o teu Session. No modo **IA**, o conteúdo dos emails vai também para o fornecedor que escolheres.
 - Este projeto **não é oficial** nem afiliado ao ISEP. Usa-o apenas com a tua própria conta e respeitando as regras de utilização do Moodle.
 
 ## Estrutura
 
 ```
 MoodleSync/      moodle_sync.py, configurar.bat, sincronizar_agora.bat
-EmailNotifier/   main.py, mail_fetcher.py, summarizer.py, moodle_report.py,
+EmailNotifier/   main.py, mail_fetcher.py, summarizer.py (regras), ai_summarizer.py (IA),
+                 configurar_resumo.py/.bat (escolher/alterar o modo), moodle_report.py,
                  session_sender.cjs (envio via Session), assistentes de configuração
 CONFIGURAR_TUDO.bat
 ```
