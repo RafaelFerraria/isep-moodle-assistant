@@ -1,0 +1,61 @@
+{
+  "name": "isep-assistant-desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Casca desktop (Electron) do ISEP Assistant: arranca o servidor local e mostra a app React.",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env ELECTRON_DEV_URL=http://127.0.0.1:5173 electron .",
+    "test": "node --test \"test/*.test.cjs\"",
+    "build:ui": "npm --prefix ../app run build",
+    "build:server": "cargo build --release --manifest-path ../server/Cargo.toml",
+    "pack": "npm run build:ui && npm run build:server && electron-builder --dir",
+    "dist": "npm run build:ui && npm run build:server && electron-builder"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "pt.isep.assistant",
+    "productName": "ISEP Assistant",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../app/dist",
+        "to": "ui"
+      },
+      {
+        "from": "../server/target/release/isep-assistant-api.exe",
+        "to": "bin/isep-assistant-api.exe"
+      },
+      {
+        "from": "../EmailNotifier/session_sender.cjs",
+        "to": "session/session_sender.cjs"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "electronLanguages": [
+      "pt-PT",
+      "en-US"
+    ]
+  }
+}

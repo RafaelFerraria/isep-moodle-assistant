@@ -26,3 +26,14 @@ Moodle_ISEP/
 .venv/
 .pytest_cache/
 EmailNotifier/history.jsonl
+
+# Rust
+server/target/
+
+# App React / Electron
+app/node_modules/
+app/dist/
+desktop/node_modules/
+desktop/dist/
+desktop/out/
+*.tsbuildinfo

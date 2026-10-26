@@ -2,7 +2,7 @@
 
 > Automatic Moodle downloads + a daily, easy-to-read email digest delivered to your phone via [Session](https://getsession.org). Built for ISEP students (Windows).
 
-Dois pequenos programas que trabalham em conjunto e correm sozinhos todos os dias:
+Dois módulos que trabalham em conjunto e correm sozinhos todos os dias, mais uma **interface gráfica** para os gerir (estado, definições com o modo de resumo, histórico):
 
 | Módulo | O que faz |
 |---|---|
@@ -112,38 +112,77 @@ Teste manual: `MoodleSync\sincronizar_agora.bat` e `EmailNotifier\executar_notif
 
 ## Estrutura
 
+O projeto tem **duas implementações do mesmo núcleo** (que respeitam o mesmo contrato HTTP, ver [docs/API.md](docs/API.md)) e **uma só interface**:
+
 ```
-isep_assistant/     NÚCLEO (Python): lógica partilhada pelos scripts, pelo agendador e pela API
-  digest.py           resumo diário (emails + Moodle -> resumo -> Session)
-  summarizer.py       resumo por regras      ai_summarizer.py   resumo por IA (CLI / API)
-  moodle_sync.py      sincronizador          moodle_report.py   análise dos ficheiros novos
-  mail_fetcher.py     leitura de emails      session.py         envio para o Session
-  config_store.py     configuração + validação (segredos só de escrita)
-  history.py          histórico de execuções system.py          Agendador do Windows, Thunderbird, rede
-  service.py          operações de alto nível usadas pela API
-  api/                API HTTP local (FastAPI) — ver docs/API.md
-MoodleSync/         configurar.bat, sincronizar_agora.bat, moodle_sync.py (atalho para o núcleo)
-EmailNotifier/      main.py (atalho para o núcleo), session_sender.cjs, assistentes de configuração
-                    (setup_master, configurar_resumo, …)
-tests/              testes automáticos (pytest)
+server/             NÚCLEO + API em Rust (isep-assistant-api.exe): resumos, Moodle, emails, Session, histórico
+app/                INTERFACE (React + TypeScript + Tailwind, Vite). Pronta para Capacitor (telemóvel, mais tarde)
+desktop/            CASCA DESKTOP (Electron): arranca o servidor local e liga a app React a ele
+isep_assistant/     NÚCLEO em Python (referência e scripts de instalação) — mesmo contrato, mesmos ficheiros de dados
+MoodleSync/         configurar.bat, sincronizar_agora.bat (atalhos para o núcleo)
+EmailNotifier/      session_sender.cjs (envio para o Session), assistentes de configuração (Python)
+tests/              testes Python (pytest) + testes de contrato que correm contra Python E Rust
 docs/API.md         contrato da API local
-CONFIGURAR_TUDO.bat
+CONFIGURAR_TUDO.bat instalação guiada (Python): Thunderbird, Session, agendamento
 ```
 
-## API local e testes
-
-O núcleo expõe uma API HTTP local (só `127.0.0.1`, com token) para uma interface gráfica gerir estado, definições, tarefas e histórico:
-
-```bat
-python -m isep_assistant.api.server
+```
+┌────────────── Electron (desktop/) ──────────────┐
+│  janela: app React (app/)  ──IPC──►  processo   │
+│  (sem token, sem rede)              principal   │──HTTP 127.0.0.1 + token──► isep-assistant-api (Rust)
+└─────────────────────────────────────────────────┘                            ├─ resumo diário, Moodle, histórico
+                                                                                └─ Agendador de Tarefas ► `digest`
 ```
 
-Contrato e segurança em [docs/API.md](docs/API.md). Testes:
+- A **janela nunca vê o token** nem faz rede: o processo principal do Electron fala com o servidor e devolve só os dados.
+- O servidor escuta **só em `127.0.0.1`**, exige token, valida o cabeçalho `Host` (contra *DNS rebinding*) e não tem CORS.
+- A interface é a mesma para qualquer servidor: mais tarde basta apontá-la a uma API na nuvem (`HttpTransport`).
+
+## Desenvolvimento
+
+Pré-requisitos: Node.js 20+, Rust (o toolchain `stable-x86_64-pc-windows-gnu` basta — não precisa de MinGW nem do Visual Studio C++, ver [server/README.md](server/README.md)) e Python 3.9+.
 
 ```bat
+:: 1) servidor Rust
+cd server
+cargo build           :: debug; "cargo build --release" para o executável final
+cargo test            :: 122 testes (HTTP, configuração, resumos, IA, Moodle, digest, API…)
+
+:: 2) interface
+cd ..\app
+npm install
+npm test              :: 54 testes (Vitest + Testing Library)
+npm run dev           :: http://127.0.0.1:5173 em modo demonstração (dados simulados)
+
+:: 3) desktop (arranca o servidor Rust e mostra a app)
+cd ..\desktop
+npm install
+npm run build:ui      :: compila a app para app/dist
+npm start             :: ou "npm run dev" com a app em http://127.0.0.1:5173
+npm test              :: 11 testes (inclui arrancar os servidores Rust e Python a sério)
+
+:: 4) contrato: o mesmo conjunto de pedidos contra Python E Rust
+cd ..
 pip install -r requirements-dev.txt
-python -m pytest
+python -m pytest      :: testes do núcleo Python + 26 de contrato
 ```
+
+O Electron escolhe o servidor por esta ordem: `ISEP_API_BIN`, executável instalado, `server/target/{release,debug}`, e por fim o servidor Python.
+O Agendador do Windows usa `EmailNotifier\executar_notificador.bat`, que corre `isep-assistant-api digest` se o executável Rust existir (`server\target\release` ou `bin\`) e Python caso contrário.
+
+### Empacotar (Windows)
+
+```bat
+cd desktop
+npm run pack          :: pasta sem instalador em desktop\dist\win-unpacked
+npm run dist          :: instalador NSIS
+```
+
+Instalada, a app guarda os dados em `%APPDATA%\ISEP Assistant\data`. A instalação guiada (Thunderbird, bot do Session) continua a ser o `CONFIGURAR_TUDO.bat`.
+
+### Telemóvel (mais tarde)
+
+A app já tem `capacitor.config.ts`. Quando chegar a altura: `npm run build && npx cap add android && npx cap sync`. No telemóvel a `HttpTransport` falará com uma API na nuvem em vez do servidor local.
 
 ## Licença
 

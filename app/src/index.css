@@ -1,0 +1,27 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Inter', sans-serif;
+  --font-mono: 'Cascadia Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200;
+}
+
+/* scrollbars discretas no desktop */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme(--color-slate-400) transparent;
+}

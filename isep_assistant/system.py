@@ -55,8 +55,16 @@ def parse_tasks_json(text: str) -> List[Dict[str, Any]]:
     return out
 
 
+def _fake_scheduler() -> bool:
+    """Com ISEP_FAKE_SCHEDULER definido (testes) o Agendador real nunca é lido nem alterado."""
+    return bool(os.environ.get("ISEP_FAKE_SCHEDULER"))
+
+
 def query_tasks(names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """Estado das tarefas agendadas (vazio fora do Windows ou se não existirem)."""
+    if _fake_scheduler():
+        return [{"name": TASK_NAMES[0], "state": "Ready", "last_run": "2026-10-26T18:00:00",
+                 "next_run": "2026-10-27T18:00:00", "last_result": 0}]
     if not IS_WINDOWS:
         return []
     names = names or TASK_NAMES
@@ -78,6 +86,8 @@ def query_tasks(names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
 
 def register_tasks(scheduled_time: str, runner_bat: Optional[str] = None) -> Tuple[bool, str]:
     """(Re)cria as tarefas diária (hora + retoma da suspensão) e ao iniciar sessão."""
+    if _fake_scheduler():
+        return True, f"(simulado) tarefas registadas para as {scheduled_time}."
     if not IS_WINDOWS:
         return False, "O Agendador de Tarefas só existe no Windows."
     runner = str(runner_bat or paths.digest_runner_bat())

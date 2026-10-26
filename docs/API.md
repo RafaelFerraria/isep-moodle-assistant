@@ -1,11 +1,16 @@
 # API local
 
-A interface gráfica fala com o núcleo (`isep_assistant/`) através de uma API HTTP local. O mesmo contrato servirá, mais tarde, a versão na nuvem: só muda o endereço.
+A interface gráfica fala com o núcleo através de uma API HTTP local. O mesmo contrato servirá, mais tarde, a versão na nuvem: só muda o endereço.
+
+Há **duas implementações** do contrato — Rust (`server/`, a usada pela app) e Python (`isep_assistant/`, referência) — e `tests/test_contract.py` corre o mesmo conjunto de pedidos contra as duas.
 
 ## Arrancar
 
 ```bat
-python -m isep_assistant.api.server            :: porta livre escolhida pelo sistema
+server\target\release\isep-assistant-api.exe serve            :: Rust; porta livre escolhida pelo sistema
+server\target\release\isep-assistant-api.exe serve --port 8765
+
+python -m isep_assistant.api.server                           :: Python (equivalente)
 python -m isep_assistant.api.server --port 8765
 ```
 
