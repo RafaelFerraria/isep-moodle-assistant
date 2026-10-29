@@ -17,10 +17,13 @@ use std::path::PathBuf;
 
 pub const LOG_NAMES: [&str; 2] = ["notifier", "sync"];
 
-/// Endereço do Moodle: só se redefine em desenvolvimento/testes (ISEP_MOODLE_BASE_URL).
-pub fn moodle_base_url() -> Option<String> {
-    std::env::var("ISEP_MOODLE_BASE_URL").ok().filter(|v| !v.is_empty())
+/// Endereço do Moodle do utilizador (ver `institutions::moodle_url`). `None` se a instituição não tem Moodle conhecido
+/// e o utilizador ainda não indicou o endereço.
+pub fn moodle_base_url(config: &Json) -> Option<String> {
+    crate::institutions::moodle_url(config)
 }
+
+pub const NO_MOODLE_URL: &str = "Falta o endereço do Moodle da tua instituição. Indica-o nas Definições (Moodle).";
 
 fn check(id: &str, label: &str, ok: bool, detail: &str, required: bool) -> Value {
     json!({"id": id, "label": label, "ok": ok, "detail": detail, "required": required})
@@ -77,6 +80,8 @@ pub fn get_status(active_job: Value) -> Value {
     let checks = vec![
         check("config", "Configuração criada", !config.is_empty(), if config.is_empty() { "Abre o assistente de configuração." } else { "" }, true),
         check("session", "Destino Session configurado", settings["destination"]["session_configured"].as_bool().unwrap_or(false), "", true),
+        check("email", "Email da escola ligado", crate::oauth::is_connected(&config), "Liga a conta de email nas Definições.",
+            matches!(str_or(&config, "email_method", "thunderbird"), "imap" | "graph" | "outlook")),
         check("thunderbird", "Thunderbird instalado", thunderbird.is_some(),
             if thunderbird.is_some() { "" } else { "Necessário para ler os emails do ISEP." },
             str_or(&config, "email_method", "thunderbird") == "thunderbird"),
@@ -92,7 +97,7 @@ pub fn get_status(active_job: Value) -> Value {
                 format!("{} tarefa(s) registada(s).", tasks.len())
             },
             system::IS_WINDOWS),
-        check("internet", "Ligação ao Moodle", system::internet_ok("moodle.isep.ipp.pt"), "", true),
+        check("internet", "Ligação ao Moodle", system::internet_ok(&moodle_base_url(&config).map(|u| crate::institutions::host_of(&u)).unwrap_or_else(|| "login.microsoftonline.com".into())), "", true),
         ai_ready(&config),
     ];
     let mut next_runs: Vec<&str> = tasks.iter().filter_map(|t| t["next_run"].as_str()).collect();
@@ -127,13 +132,18 @@ pub fn get_setup(active_job: Value) -> Value {
     let mood = moodle_state(&config);
     let method = str_or(&config, "email_method", "thunderbird").to_string();
     let (email_ok, email_detail) = match method.as_str() {
-        "graph" => (crate::graph::is_connected(&config), "Conta Microsoft do ISEP ligada.".to_string()),
+        "imap" | "graph" | "outlook" => (
+            crate::oauth::is_connected(&config) && str_of(&config, "email_address").contains('@'),
+            "Email da escola ligado.".to_string(),
+        ),
         _ => (system::find_thunderbird_path().is_some(), "Thunderbird instalado com a conta do ISEP.".to_string()),
     };
     let session = crate::session::state(&config);
     let session_ok = session["configured"].as_bool().unwrap_or(false) && session["node_ok"].as_bool().unwrap_or(false);
     let schedule_ok = !tasks.is_empty() && !tasks_broken(&tasks);
+    let student = &settings["student"];
     let steps = vec![
+        check("profile", "Perfil", student["configured"].as_bool().unwrap_or(false), "Instituição, curso e ano.", true),
         check("email", "Emails", email_ok, &email_detail, true),
         check("moodle", "Moodle", mood["configured"].as_bool().unwrap_or(false), "Número e palavra-passe do Moodle.", false),
         check("session", "Session", session_ok, "Bot criado e o teu Session associado.", true),
@@ -194,7 +204,8 @@ pub fn set_moodle_credentials(username: &str, password: &str) -> Result<String, 
         d => PathBuf::from(d),
     };
     let sync_dir = moodle_dir_of(&config);
-    moodle_sync::set_credentials(username, password, moodle_base_url().as_deref(), sync_dir.as_deref(), &download_dir)
+    let base = moodle_base_url(&config).ok_or(NO_MOODLE_URL)?;
+    moodle_sync::set_credentials(username, password, Some(&base), sync_dir.as_deref(), &download_dir)
 }
 
 pub fn recent_new_files(limit: usize) -> Vec<Value> {

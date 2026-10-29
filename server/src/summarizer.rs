@@ -5,6 +5,7 @@ use crate::util::Json;
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, Timelike};
 use regex::Regex;
 use std::sync::LazyLock;
+use crate::rules::Rules;
 
 pub const LINE: &str = "━━━━━━━━━━━━━━━━━━━━━━━━";
 const DIAS_SEMANA: [&str; 7] = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
@@ -415,6 +416,27 @@ pub fn section_geral(emails: &[&Email]) -> Vec<String> {
 }
 
 pub fn build_summary(emails: &[Email], moodle_lines: &[String], now: NaiveDateTime) -> String {
+    build_summary_with(emails, moodle_lines, now, &Rules::default())
+}
+
+/// «Importante»: emails que contêm uma das palavras escolhidas pelo utilizador. Aparecem primeiro e saem das outras secções.
+pub fn section_importante(emails: &[&Email]) -> Vec<String> {
+    if emails.is_empty() {
+        return vec![];
+    }
+    let mut lines = vec!["⭐ IMPORTANTE".to_string()];
+    for e in emails {
+        let subj = strip_bracket(&clean_subject(if e.subject.is_empty() { "Sem assunto" } else { &e.subject }));
+        let txt = body_excerpt(&e.body, 0, 140);
+        lines.push(if txt.is_empty() { format!("• {subj}") } else { format!("• {subj} — {txt}") });
+    }
+    lines
+}
+
+pub fn build_summary_with(emails: &[Email], moodle_lines: &[String], now: NaiveDateTime, rules: &Rules) -> String {
+    let important: Vec<&Email> = emails.iter().filter(|e| rules.is_important(e)).collect();
+    let emails: Vec<Email> = emails.iter().filter(|e| !rules.is_important(e)).cloned().collect();
+    let emails = &emails[..];
     let of = |k: Kind| -> Vec<&Email> { emails.iter().filter(|e| classify(e) == k).collect() };
     let prazos: Vec<Prazo> = of(Kind::Prazo)
         .into_iter()
@@ -428,6 +450,7 @@ pub fn build_summary(emails: &[Email], moodle_lines: &[String], now: NaiveDateTi
     let seguranca = of(Kind::Seguranca).len();
 
     let sections: Vec<Vec<String>> = vec![
+        section_importante(&important),
         section_prazos(&prazos, now),
         section_avisos(&forum),
         moodle_lines.to_vec(),
@@ -437,7 +460,7 @@ pub fn build_summary(emails: &[Email], moodle_lines: &[String], now: NaiveDateTi
     ];
     let mut out: Vec<String> = vec![
         format!("📬 RESUMO ISEP — {} {:02}/{:02} {:02}:{:02}", DIAS_SEMANA[now.weekday().num_days_from_monday() as usize], now.day(), now.month(), now.hour(), now.minute()),
-        format!("{} emails novos", emails.len()),
+        format!("{} emails novos", emails.len() + important.len()),
     ];
     for sec in sections.into_iter().filter(|s| !s.is_empty()) {
         out.push(String::new());
@@ -467,6 +490,10 @@ pub fn sample_emails() -> Vec<Email> {
 /// Resumo por regras (local) ou, se `summary_mode == "ai"`, reescrito por uma IA.
 /// Se a IA falhar (CLI sem login, token inválido, sem rede), cai para as regras e avisa no fim.
 pub fn summarize_emails(emails: &[Email], config: &Json, moodle_lines: &[String]) -> String {
+    let rules = Rules::from_config(config);
+    // as regras de «ignorar» valem nos dois modos: o que o utilizador não quer ver nunca chega à IA
+    let kept: Vec<Email> = emails.iter().filter(|e| !rules.is_ignored(e)).cloned().collect();
+    let emails = &kept[..];
     if emails.is_empty() && moodle_lines.is_empty() {
         return "📬 ISEP: sem emails novos nem ficheiros novos no Moodle desde a última verificação.".into();
     }
@@ -481,5 +508,5 @@ pub fn summarize_emails(emails: &[Email], config: &Json, moodle_lines: &[String]
             }
         };
     }
-    build_summary(emails, moodle_lines, now)
+    build_summary_with(emails, moodle_lines, now, &rules)
 }

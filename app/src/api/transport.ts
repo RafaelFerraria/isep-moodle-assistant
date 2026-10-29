@@ -45,6 +45,8 @@ export class HttpTransport implements Transport {
 export interface IsepBridge {
   request(method: string, path: string, body?: unknown): Promise<TransportResponse>
   backend?(): Promise<{ ready: boolean; error?: string | null; version?: string }>
+  /** Abre o seletor de pastas do sistema. Devolve `null` se o utilizador cancelar. */
+  pickFolder?(): Promise<string | null>
 }
 
 declare global {

@@ -40,6 +40,10 @@
       {
         "from": "../EmailNotifier/session_sender.cjs",
         "to": "session/session_sender.cjs"
+      },
+      {
+        "from": "../EmailNotifier/mail_fetcher.cjs",
+        "to": "session/mail_fetcher.cjs"
       }
     ],
     "win": {

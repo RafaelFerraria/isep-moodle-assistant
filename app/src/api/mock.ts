@@ -1,7 +1,7 @@
 // Servidor simulado em memória: serve a app em modo demonstração (sem backend) e os testes.
 // Reproduz as regras do contrato real: validação com erros por campo, segredos só de escrita, uma tarefa de cada vez.
 import type { Transport, TransportResponse } from './transport'
-import type { Activity, DevicePoll, EmailItem, EmailsResult, HistoryRecord, Job, MoodleFiles, NewFile, Overview, SessionState, SetupState, Settings, SettingsPatch, Status } from './types'
+import type { Activity, DevicePoll, EmailItem, EmailsResult, HistoryRecord, Institution, Job, MoodleFiles, NewFile, Overview, SessionState, SetupState, Settings, SettingsPatch, Status, SummaryRules } from './types'
 
 export interface MockOptions {
   /** Duração simulada das tarefas (ms). 0 = terminam no pedido seguinte ao arranque. */
@@ -16,6 +16,14 @@ function iso(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
+
+const INSTITUTIONS: Institution[] = [
+  { id: 'isep', name: 'ISEP – Instituto Superior de Engenharia do Porto (P.PORTO)', has_moodle: true },
+  { id: 'ubi', name: 'Universidade da Beira Interior', has_moodle: true },
+  { id: 'uminho', name: 'Universidade do Minho', has_moodle: false },
+  { id: 'up', name: 'Universidade do Porto', has_moodle: false },
+  { id: 'ulisboa', name: 'Universidade de Lisboa', has_moodle: true },
+]
 
 export class MockTransport implements Transport {
   settings: Settings
@@ -53,12 +61,22 @@ export class MockTransport implements Transport {
         ai_api_key_set: false,
         ai_api_key_env: 'OPENAI_API_KEY',
         ai_api_key_env_set: false,
+        rules: { important_keywords: [], ignore_senders: [], ignore_subjects: [] },
       },
       schedule: { time: '18:00' },
       destination: { session_recipients: ['05a79f…d22077'], session_configured: true },
       email: { method: 'thunderbird', address: '1234567@isep.ipp.pt', connected: false },
       setup: { done: true },
-      moodle: { sync_dir: 'C:/isep-moodle-assistant/MoodleSync', download_dir: 'C:/Users/aluno/Downloads/Moodle_ISEP' },
+      student: { institution_id: 'isep', institution_name: 'ISEP – Instituto Superior de Engenharia do Porto (P.PORTO)', course: 'Engenharia Informática', year: 3, configured: true },
+      moodle: {
+        sync_dir: 'C:/isep-moodle-assistant/MoodleSync',
+        download_dir: 'C:/Users/aluno/Downloads/Moodle_ISEP',
+        default_download_dir: 'C:/Users/aluno/Downloads/Moodle_ISEP',
+        download_dir_is_default: true,
+        auto_download: true,
+        url: 'https://moodle.isep.ipp.pt',
+        url_source: 'institution',
+      },
     }
     this.history = [
       {
@@ -134,6 +152,9 @@ export class MockTransport implements Transport {
     if (route === 'GET /moodle/files') return ok({ ...this.moodleProgress, downloaded: this.newFiles, moodle: { ...this.moodleProgress.moodle, configured: this.moodle.configured, username: this.moodle.username } })
     if (route === 'GET /activity') return ok(this.activity(Number(q.get('days') ?? 7)))
     if (route === 'GET /setup') return ok(this.setupState())
+    if (route === 'GET /institutions') return ok({ items: INSTITUTIONS })
+    if (route === 'POST /moodle/probe') return this.probe((body as { url: string }).url)
+    if (route === 'POST /session/account') return this.createAccount()
     if (route === 'GET /session') return ok(this.session)
     if (route === 'POST /session/bot') return this.createBot((body as { force?: boolean } | undefined)?.force === true)
     if (route === 'POST /session/pair') return this.startJob('session_pair', false)
@@ -271,8 +292,9 @@ export class MockTransport implements Transport {
 
   private setupState(): SetupState {
     const s = this.settings
-    const emailOk = s.email.method === 'graph' ? s.email.connected : true
+    const emailOk = s.email.method === 'imap' ? s.email.connected && s.email.address.includes('@') : true
     const steps: Status['checks'] = [
+      { id: 'profile', label: 'Perfil', ok: s.student.configured, detail: '', required: true },
       { id: 'email', label: 'Emails', ok: emailOk, detail: '', required: true },
       { id: 'moodle', label: 'Moodle', ok: this.moodle.configured, detail: '', required: false },
       { id: 'session', label: 'Session', ok: this.session.configured, detail: '', required: true },
@@ -303,9 +325,22 @@ export class MockTransport implements Transport {
     return ok(this.session)
   }
 
+  private probe(raw: string): TransportResponse {
+    const url = (raw || '').trim().replace(/\/+$/, '')
+    if (!url || !/^https?:\/\/\S+\.\S+/.test(url.startsWith('http') ? url : `https://${url}`)) return fail(422, 'Endereço inválido. Exemplo: https://moodle.escola.pt', { errors: { url: 'Endereço inválido.' } })
+    if (!url.includes('moodle')) return fail(422, `${url} não parece ser um Moodle (resposta 404).`, { errors: { url: `${url} não parece ser um Moodle (resposta 404).` } })
+    return ok({ ok: true, url: url.startsWith('http') ? url : `https://${url}` })
+  }
+
+  private createAccount(): TransportResponse {
+    const id = `05${'ef'.repeat(32)}`
+    this.addRecipient(id)
+    return ok({ session_id: id, mnemonic: 'um dois tres quatro cinco seis sete oito nove dez onze doze treze', state: this.session })
+  }
+
   private pollDevice(): DevicePoll {
     if (!this.deviceApproved) return { status: 'pending' }
-    this.settings = { ...this.settings, email: { ...this.settings.email, method: 'graph', connected: true } }
+    this.settings = { ...this.settings, email: { ...this.settings.email, method: 'imap', connected: true } }
     return { status: 'done' }
   }
 
@@ -367,15 +402,68 @@ export class MockTransport implements Transport {
       else errors['destination.session_id'] = 'deve ter 66 caracteres hexadecimais e começar por 05'
     }
     if (patch.email?.method !== undefined) {
-      if (patch.email.method === 'thunderbird' || patch.email.method === 'graph') next.email.method = patch.email.method
-      else errors['email.method'] = "deve ser um de ['graph', 'thunderbird']"
+      if (patch.email.method === 'thunderbird' || patch.email.method === 'imap') next.email.method = patch.email.method
+      else errors['email.method'] = "deve ser um de ['imap', 'thunderbird']"
     }
     if (patch.email?.address !== undefined) {
       if (patch.email.address === '' || patch.email.address.includes('@')) next.email.address = patch.email.address
       else errors['email.address'] = 'endereço de email inválido'
     }
     if (patch.setup?.done !== undefined) next.setup.done = patch.setup.done
-    if (patch.moodle?.download_dir !== undefined) next.moodle.download_dir = patch.moodle.download_dir
+    if (patch.student) {
+      const st = patch.student
+      if (st.institution_id !== undefined) {
+        if (st.institution_id === 'outra' || INSTITUTIONS.some((i) => i.id === st.institution_id)) {
+          const inst = INSTITUTIONS.find((i) => i.id === st.institution_id)
+          next.student.institution_id = st.institution_id
+          next.student.institution_name = inst?.name ?? next.student.institution_name
+          if (inst) next.moodle.url = inst.has_moodle ? `https://moodle.${inst.id}.pt` : next.moodle.url_source === 'custom' ? next.moodle.url : null
+          if (inst) next.moodle.url_source = inst.has_moodle ? 'institution' : next.moodle.url_source === 'custom' ? 'custom' : 'missing'
+        } else errors['student.institution_id'] = 'instituição desconhecida'
+      }
+      if (st.institution_name !== undefined) {
+        if (st.institution_name.trim().length >= 2) next.student.institution_name = st.institution_name.trim()
+        else errors['student.institution_name'] = 'entre 2 e 100 caracteres'
+      }
+      if (next.student.institution_id === 'outra' && !next.student.institution_name) errors['student.institution_name'] = 'indica o nome da instituição'
+      if (st.course !== undefined) {
+        if (st.course.trim().length >= 2 && st.course.trim().length <= 120) next.student.course = st.course.trim()
+        else errors['student.course'] = 'entre 2 e 120 caracteres'
+      }
+      if (st.year !== undefined) {
+        if (Number.isInteger(st.year) && st.year >= 1 && st.year <= 6) next.student.year = st.year
+        else errors['student.year'] = 'entre 1 e 6'
+      }
+      next.student.configured = !!next.student.institution_id && !!next.student.course && next.student.year > 0
+    }
+    if (patch.summary?.rules) {
+      const r = patch.summary.rules
+      for (const key of ['important_keywords', 'ignore_senders', 'ignore_subjects'] as const) {
+        const raw = r[key]
+        if (raw === undefined) continue
+        const items = raw.map((t) => t.split(/\s+/).filter(Boolean).join(' ')).filter(Boolean)
+        const bad = items.find((t) => t.length < 2 || t.length > 60)
+        if (bad) errors[`summary.rules.${key}`] = bad.length < 2 ? `«${bad}» é demasiado curto (mínimo 2 caracteres)` : 'demasiado longo (máximo 60 caracteres)'
+        else if (items.length > 30) errors[`summary.rules.${key}`] = `no máximo 30 entradas (tens ${items.length})`
+        else (next.summary.rules as SummaryRules)[key] = [...new Map(items.map((t) => [t.toLowerCase(), t])).values()]
+      }
+    }
+    if (patch.moodle?.download_dir !== undefined) {
+      const dir = patch.moodle.download_dir.trim()
+      next.moodle.download_dir = dir || next.moodle.default_download_dir
+      next.moodle.download_dir_is_default = !dir
+    }
+    if (patch.moodle?.auto_download !== undefined) next.moodle.auto_download = patch.moodle.auto_download
+    if (patch.moodle?.url !== undefined) {
+      const url = patch.moodle.url.trim()
+      if (!url) {
+        next.moodle.url_source = next.student.institution_id && INSTITUTIONS.find((i) => i.id === next.student.institution_id)?.has_moodle ? 'institution' : 'missing'
+        if (next.moodle.url_source === 'missing') next.moodle.url = null
+      } else if (/^(https?:\/\/)?[^\s/]+\.[^\s/]+/.test(url)) {
+        next.moodle.url = (url.startsWith('http') ? url : `https://${url}`).replace(/\/+$/, '')
+        next.moodle.url_source = 'custom'
+      } else errors['moodle.url'] = 'endereço inválido (ex.: https://moodle.escola.pt)'
+    }
     if (patch.moodle?.sync_dir !== undefined) next.moodle.sync_dir = patch.moodle.sync_dir
     if (Object.keys(errors).length) return fail(422, 'Definições inválidas.', { errors })
     this.settings = next

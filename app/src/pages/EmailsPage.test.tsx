@@ -15,14 +15,14 @@ describe('EmailsPage', () => {
     expect(items[0]).toHaveTextContent('A entrega do Sprint 2 é amanhã às 23:59.')
     expect(items[0]).not.toHaveTextContent('No resumo')
     expect(items[1]).toHaveTextContent('No resumo')
-    expect(screen.getByText(/Origem: Thunderbird/)).toBeInTheDocument()
+    expect(screen.getByText(/Origem: Thunderbird \(configuração anterior\)/)).toBeInTheDocument()
   })
 
-  it('diz qual é o serviço próprio quando a origem é a conta Microsoft', async () => {
+  it('diz que o email é lido pela própria app quando a origem é o serviço interno', async () => {
     const mock = new MockTransport()
-    mock.settings.email.method = 'graph'
+    mock.settings.email.method = 'imap'
     renderWithApi(<EmailsPage />, { mock })
-    expect(await screen.findByText(/Conta Microsoft do ISEP \(serviço da app\)/)).toBeInTheDocument()
+    expect(await screen.findByText(/o teu email da escola, lido pela app/)).toBeInTheDocument()
   })
 
   it('muda o período e pede os dados ao servidor', async () => {

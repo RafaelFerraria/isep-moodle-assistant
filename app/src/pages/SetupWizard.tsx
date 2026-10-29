@@ -1,32 +1,43 @@
-import { Bot, CalendarClock, Check, Mail, Shield } from 'lucide-react'
-import { useState } from 'react'
+import { CalendarClock, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { ApiError } from '../api'
-import type { EmailMethod, SessionState, SetupState, SummaryMode } from '../api'
-import { EmailConnect } from '../components/EmailConnect'
+import type { SessionState, Settings } from '../api'
+import { EmailSetup } from '../components/EmailSetup'
 import { MoodleCredentials } from '../components/MoodleCredentials'
+import { MoodleSetup } from '../components/MoodleSetup'
+import { validateRules } from '../components/RulesEditor'
 import { SessionPanel } from '../components/SessionPanel'
-import { Button, Card, Choice, Field, Notice, Spinner, TextInput, cx } from '../components/ui'
+import { StudentFields, validateStudent } from '../components/StudentFields'
+import type { StudentValue } from '../components/StudentFields'
+import { Button, Card, Field, Notice, Spinner, TextInput, cx } from '../components/ui'
 import { useApp } from '../lib/context'
 import { useAsync } from '../lib/hooks'
+import { SummarySection, TestSection, buildPatch, toDraft } from './SettingsPage'
+import type { Draft } from './SettingsPage'
 
-const STEPS = ['Emails', 'Moodle', 'Session', 'Resumo', 'Agendamento'] as const
+const STEPS = ['O teu curso', 'Email', 'Moodle', 'Session', 'Resumo', 'Agendamento'] as const
 
 /** Primeiro arranque: leva o utilizador do zero a um resumo diário a funcionar, sem terminal. */
 export function SetupWizard({ onDone }: { onDone: () => void }) {
   const { api } = useApp()
-  const setup = useAsync<SetupState>(() => api.setup(), [api])
-  const settings = useAsync(() => api.settings(), [api])
+  const settings = useAsync<Settings>(() => api.settings(), [api])
   const [step, setStep] = useState(0)
-  const [method, setMethod] = useState<EmailMethod | null>(null)
-  const [address, setAddress] = useState('')
-  const [mode, setMode] = useState<SummaryMode | null>(null)
-  const [time, setTime] = useState<string | null>(null)
+  const [student, setStudent] = useState<StudentValue | null>(null)
+  const [draft, setDraft] = useState<Draft | null>(null)
   const [sessionOk, setSessionOk] = useState<boolean | null>(null)
+  const [time, setTime] = useState<string | null>(null)
+  const [scheduled, setScheduled] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [scheduled, setScheduled] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  if (!setup.data || !settings.data) {
+  useEffect(() => {
+    if (!settings.data) return
+    setStudent((cur) => cur ?? toDraft(settings.data!).student)
+    setDraft((cur) => cur ?? toDraft(settings.data!))
+  }, [settings.data])
+
+  if (!settings.data || !student || !draft) {
     return (
       <div className="grid h-full place-items-center" role="status">
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -37,38 +48,69 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
   }
 
   const s = settings.data
-  const chosenMethod = method ?? s.email.method
-  const chosenMode = mode ?? s.summary.mode
   const chosenTime = time ?? s.schedule.time
-  const thunderbirdOk = s.email.method === 'thunderbird' && (setup.data.steps.find((c) => c.id === 'email')?.ok ?? false)
-  const sessionReady = sessionOk ?? setup.data.steps.find((c) => c.id === 'session')?.ok ?? false
+  const sessionReady = sessionOk ?? s.destination.session_configured
+  const emailReady = s.email.method === 'imap' && s.email.connected
+  const reload = () => void settings.reload()
+  const next = () => {
+    setError(null)
+    setFieldErrors({})
+    setStep((n) => Math.min(n + 1, STEPS.length - 1))
+  }
+  const back = () => {
+    setError(null)
+    setFieldErrors({})
+    setStep((n) => Math.max(n - 1, 0))
+  }
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true)
     setError(null)
+    setFieldErrors({})
     try {
       await work()
     } catch (e) {
-      setError(e instanceof ApiError ? (Object.values(e.fields)[0] ?? e.message) : String(e))
+      if (e instanceof ApiError && e.status === 422 && Object.keys(e.fields).length) setFieldErrors(e.fields)
+      else setError(e instanceof ApiError ? e.message : String(e))
     } finally {
       setBusy(false)
     }
   }
 
-  const next = () => setStep((n) => Math.min(n + 1, STEPS.length - 1))
-
-  const saveEmail = () =>
-    run(async () => {
-      await api.updateSettings({ email: { method: chosenMethod, ...(address.trim() ? { address: address.trim() } : {}) } })
+  const saveStudent = () => {
+    const local = validateStudent(student)
+    if (Object.keys(local).length) {
+      setFieldErrors(local)
+      return Promise.resolve()
+    }
+    return run(async () => {
+      await api.updateSettings({
+        student: {
+          institution_id: student.institutionId,
+          ...(student.institutionId === 'outra' ? { institution_name: student.institutionName.trim() } : {}),
+          course: student.course.trim(),
+          year: student.year,
+        },
+      })
       await settings.reload()
       next()
     })
+  }
 
-  const saveMode = () =>
-    run(async () => {
-      await api.updateSettings({ summary: { mode: chosenMode } })
+  const saveSummary = () => {
+    const local = validateRules(draft.rules)
+    if (Object.keys(local).length) {
+      setFieldErrors(Object.fromEntries(Object.entries(local).map(([k, v]) => [`summary.rules.${k}`, v])))
+      return Promise.resolve()
+    }
+    return run(async () => {
+      const patch = buildPatch(s, draft)
+      const only = { ...(patch.summary ? { summary: patch.summary } : {}) }
+      if (Object.keys(only).length) await api.updateSettings(only)
+      await settings.reload()
       next()
     })
+  }
 
   const activate = () =>
     run(async () => {
@@ -84,11 +126,13 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
       onDone()
     })
 
+  const setD = (p: Partial<Draft>) => setDraft({ ...draft, ...p })
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6 lg:p-10">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Vamos configurar o ISEP Assistant</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">São 5 passos e demora poucos minutos. Podes mudar tudo depois nas Definições.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">São 6 passos e demora poucos minutos. Podes mudar tudo depois nas Definições.</p>
       </header>
 
       <nav aria-label="Passos da configuração">
@@ -112,29 +156,11 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
       {error && <Notice tone="bad">{error}</Notice>}
 
       {step === 0 && (
-        <Card title="De onde vêm os teus emails?" subtitle="A app só lê; nunca apaga nem envia emails.">
+        <Card title="Onde estudas?" subtitle="Escolhe a instituição, o curso e o ano. Fica guardado só neste PC.">
           <div className="space-y-5">
-            <Choice<EmailMethod>
-              legend="Origem dos emails"
-              value={chosenMethod}
-              onChange={setMethod}
-              options={[
-                { value: 'thunderbird', title: 'Thunderbird (recomendado)', description: 'Usa o Thunderbird que já tens com a conta do ISEP. Funciona sem aprovações.', icon: <Mail className="size-5" /> },
-                { value: 'graph', title: 'Conta do ISEP (experimental)', description: 'Liga-se diretamente à conta Microsoft, sem Thunderbird. Pode exigir aprovação de um administrador do ISEP.', icon: <Mail className="size-5" /> },
-              ]}
-            />
-            {chosenMethod === 'graph' ? (
-              <EmailConnect connected={s.email.connected} onConnected={() => void settings.reload()} />
-            ) : (
-              <Notice tone={thunderbirdOk ? 'good' : 'info'}>
-                {thunderbirdOk ? 'Thunderbird encontrado.' : 'Confirma que o Thunderbird está instalado e com a conta do ISEP configurada.'}
-              </Notice>
-            )}
-            <Field label="O teu email do ISEP (opcional)">
-              {(p) => <TextInput {...p} type="email" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={s.email.address || 'numero@isep.ipp.pt'} />}
-            </Field>
+            <StudentFields value={student} onChange={setStudent} errors={fieldErrors} />
             <div className="flex justify-end">
-              <Button variant="primary" onClick={() => void saveEmail()} loading={busy} disabled={chosenMethod === 'graph' && !s.email.connected}>
+              <Button variant="primary" onClick={() => void saveStudent()} loading={busy}>
                 Continuar
               </Button>
             </div>
@@ -144,14 +170,15 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
 
       {step === 1 && (
         <div className="space-y-4">
-          <MoodleCredentials username="" onSaved={() => void setup.reload()} />
-          <p className="text-xs text-slate-500">Sem o Moodle, o resumo só inclui emails. Podes ligá-lo mais tarde.</p>
+          <Card title="O teu email" subtitle="A app lê os emails da tua escola diretamente, sem precisares de mais nenhum programa. Só lê; nunca apaga nem envia.">
+            <EmailSetup email={s.email} onChanged={reload} />
+          </Card>
           <div className="flex justify-between">
-            <Button variant="ghost" onClick={() => setStep(0)}>
+            <Button variant="ghost" onClick={back}>
               Voltar
             </Button>
             <Button variant="primary" onClick={next}>
-              {setup.data.steps.find((c) => c.id === 'moodle')?.ok ? 'Continuar' : 'Saltar este passo'}
+              {emailReady ? 'Continuar' : 'Configurar mais tarde'}
             </Button>
           </div>
         </div>
@@ -159,11 +186,27 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
 
       {step === 2 && (
         <div className="space-y-4">
+          <MoodleSetup moodle={s.moodle} onChanged={reload} />
+          <MoodleCredentials username="" onSaved={reload} />
+          <p className="text-xs text-slate-500">Sem o Moodle, o resumo só inclui emails. Podes ligá-lo mais tarde.</p>
+          <div className="flex justify-between">
+            <Button variant="ghost" onClick={back}>
+              Voltar
+            </Button>
+            <Button variant="primary" onClick={next}>
+              Continuar
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="space-y-4">
           <Card title="Session" subtitle="É aqui que recebes o resumo.">
             <SessionPanel onChange={(st: SessionState) => setSessionOk(st.configured && st.node_ok)} />
           </Card>
           <div className="flex justify-between">
-            <Button variant="ghost" onClick={() => setStep(1)}>
+            <Button variant="ghost" onClick={back}>
               Voltar
             </Button>
             <Button variant="primary" onClick={next} disabled={!sessionReady}>
@@ -173,31 +216,22 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
-      {step === 3 && (
-        <Card title="Como queres o resumo?" subtitle="Podes afinar a IA mais tarde nas Definições.">
-          <div className="space-y-5">
-            <Choice<SummaryMode>
-              legend="Tipo de resumo"
-              value={chosenMode}
-              onChange={setMode}
-              options={[
-                { value: 'rules', title: 'Regras', description: 'Local e privado: os emails nunca saem do teu PC.', icon: <Shield className="size-5" /> },
-                { value: 'ai', title: 'IA', description: 'Um modelo reescreve o resumo (mais natural). Configuras a ligação nas Definições.', icon: <Bot className="size-5" /> },
-              ]}
-            />
-            <div className="flex justify-between">
-              <Button variant="ghost" onClick={() => setStep(2)}>
-                Voltar
-              </Button>
-              <Button variant="primary" onClick={() => void saveMode()} loading={busy}>
-                Continuar
-              </Button>
-            </div>
+      {step === 4 && (
+        <div className="space-y-4">
+          <SummarySection s={s} d={draft} set={setD} errors={fieldErrors} />
+          <TestSection dirty={Object.keys(buildPatch(s, draft)).length > 0} mode={s.summary.mode} />
+          <div className="flex justify-between">
+            <Button variant="ghost" onClick={back}>
+              Voltar
+            </Button>
+            <Button variant="primary" onClick={() => void saveSummary()} loading={busy}>
+              Continuar
+            </Button>
           </div>
-        </Card>
+        </div>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <Card title="Quando queres receber o resumo?" subtitle="Corre todos os dias a esta hora (e ao retomar o PC da suspensão), mesmo com a app fechada.">
           <div className="space-y-5">
             <div className="max-w-xs">
@@ -211,7 +245,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
               </Button>
             )}
             <div className="flex justify-between">
-              <Button variant="ghost" onClick={() => setStep(3)}>
+              <Button variant="ghost" onClick={back}>
                 Voltar
               </Button>
               <Button variant="primary" onClick={() => void finish()} loading={busy} disabled={!scheduled}>

@@ -3,7 +3,8 @@ pub mod jobs;
 pub mod security;
 
 use crate::config;
-use crate::graph;
+use crate::oauth;
+use crate::institutions;
 use crate::session;
 use crate::views;
 use crate::digest::{moodle_dir_of, run_digest, Deps};
@@ -105,6 +106,8 @@ pub fn handle(app: &App, req: &Req) -> Resp {
         ["status"] | ["settings"] | ["history"] | ["jobs"] | ["moodle", "new-files"] => Some((if segments[0] == "settings" { &["GET", "PUT"] } else { &["GET"] }, true)),
         ["summary", "test"] | ["schedule", "register"] | ["digest", "preview"] | ["digest", "run"] | ["moodle", "sync"] => Some((&["POST"], true)),
         ["moodle", "credentials"] => Some((&["PUT"], true)),
+        ["institutions"] => Some((&["GET"], true)),
+        ["moodle", "probe"] | ["session", "account"] => Some((&["POST"], true)),
         ["overview"] | ["emails"] | ["activity"] | ["session"] | ["setup"] | ["moodle", "files"] => Some((&["GET"], true)),
         ["session", "bot"] | ["session", "pair"] | ["session", "test"] | ["session", "recipients"] => Some((&["POST"], true)),
         ["session", "recipients", _] => Some((&["DELETE"], true)),
@@ -169,12 +172,28 @@ pub fn handle(app: &App, req: &Req) -> Resp {
             match app.jobs.submit("moodle_sync", move |progress| {
                 let dir = moodle_dir_of(&config::load_config());
                 let sink: moodle_sync::LogSink = Box::new(move |l| progress(l));
-                Ok(moodle_sync::run_sync("api", dir.as_deref(), service::moodle_base_url().as_deref(), Some(sink)).to_json())
+                let Some(base) = service::moodle_base_url(&config::load_config()) else { return Err(service::NO_MOODLE_URL.into()) };
+                Ok(moodle_sync::run_sync("api", dir.as_deref(), Some(&base), Some(sink)).to_json())
             }) {
                 Ok(job) => resp(202, job),
                 Err(b) => busy(b),
             }
         }
+        ("GET", ["institutions"]) => resp(200, institutions::catalog()),
+        ("POST", ["moodle", "probe"]) => {
+            let body = match body_json(req) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            match institutions::probe(body["url"].as_str().unwrap_or("")) {
+                Ok(url) => resp(200, json!({"ok": true, "url": url})),
+                Err(m) => resp(422, json!({"detail": m, "errors": {"url": m}})),
+            }
+        }
+        ("POST", ["session", "account"]) => match session::create_account() {
+            Ok(v) => resp(200, v),
+            Err(e) => detail(400, &e),
+        },
         ("GET", ["overview"]) => match int_param(req, "days", 7, 1, 30) {
             Ok(days) => resp(200, views::overview(days)),
             Err(e) => e,
@@ -230,7 +249,7 @@ pub fn handle(app: &App, req: &Req) -> Resp {
             Some(Err(e)) => detail(404, &e),
             None => detail(422, "Índice inválido."),
         },
-        ("POST", ["email", "connect", "start"]) => match graph::start_device_login(&config::load_config()) {
+        ("POST", ["email", "connect", "start"]) => match oauth::start_device_login(&config::load_config()) {
             Ok(v) => resp(200, v),
             Err(e) => detail(502, &e),
         },
@@ -241,12 +260,12 @@ pub fn handle(app: &App, req: &Req) -> Resp {
             };
             let Some(code) = body["device_code"].as_str() else { return detail(422, "device_code é obrigatório.") };
             let mut cfg = config::load_config();
-            match graph::poll_device_login(&cfg, code) {
-                Ok(graph::Poll::Pending) => resp(200, json!({"status": "pending"})),
-                Ok(graph::Poll::Failed(m)) => resp(200, json!({"status": "failed", "message": m})),
-                Ok(graph::Poll::Done { refresh_token }) => {
-                    let saved = graph::store_refresh_token(&mut cfg, &refresh_token).and_then(|_| {
-                        cfg.insert("email_method".into(), json!("graph"));
+            match oauth::poll_device_login(&cfg, code) {
+                Ok(oauth::Poll::Pending) => resp(200, json!({"status": "pending"})),
+                Ok(oauth::Poll::Failed(m)) => resp(200, json!({"status": "failed", "message": m})),
+                Ok(oauth::Poll::Done { refresh_token }) => {
+                    let saved = oauth::store_refresh_token(&mut cfg, &refresh_token).and_then(|_| {
+                        cfg.insert("email_method".into(), json!("imap"));
                         config::save_config(&cfg).map_err(|e| e.to_string())
                     });
                     match saved {

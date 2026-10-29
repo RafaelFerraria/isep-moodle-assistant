@@ -54,6 +54,20 @@ describe('SessionPage', () => {
     expect(await screen.findByText('05cdcd…cdcd')).toBeInTheDocument()
   })
 
+  it('cria uma conta Session para quem não tem, mostra a frase de recuperação uma vez e associa-a', async () => {
+    const user = userEvent.setup()
+    const mock = new MockTransport()
+    mock.session = { ...mock.session, recipients: [], configured: false }
+    renderWithApi(<SessionPage />, { mock })
+    await user.click(await screen.findByText('Ainda não tenho o Session'))
+    await user.click(screen.getByRole('button', { name: 'Criar a minha conta Session' }))
+    expect(await screen.findByLabelText('Frase de recuperação')).toHaveTextContent('um dois tres')
+    expect(screen.getByText(/Só a vês uma vez e a app não a guarda/)).toBeInTheDocument()
+    expect(within(await screen.findByRole('list', { name: 'Destinatários' })).getByText('05efef…efef')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Já guardei a frase' }))
+    expect(screen.queryByLabelText('Frase de recuperação')).not.toBeInTheDocument()
+  })
+
   it('remove um destinatário', async () => {
     const user = userEvent.setup()
     renderWithApi(<SessionPage />)

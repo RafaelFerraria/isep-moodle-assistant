@@ -75,8 +75,13 @@ fn main() {
             i32::from(!res.ok)
         }
         Some("sync") => {
-            let dir = isep_assistant::digest::moodle_dir_of(&config::load_config());
-            let res = moodle_sync::run_sync("manual", dir.as_deref(), service::moodle_base_url().as_deref(), None);
+            let cfg = config::load_config();
+            let dir = isep_assistant::digest::moodle_dir_of(&cfg);
+            let Some(base) = service::moodle_base_url(&cfg) else {
+                eprintln!("{}", service::NO_MOODLE_URL);
+                std::process::exit(1);
+            };
+            let res = moodle_sync::run_sync("manual", dir.as_deref(), Some(&base), None);
             i32::from(!res.ok && !res.busy)
         }
         Some("version") | Some("--version") => {

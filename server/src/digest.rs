@@ -136,6 +136,13 @@ pub fn moodle_dir_of(config: &Json) -> Option<PathBuf> {
 /// Garante que o Moodle já foi sincronizado hoje (ou sincroniza-o agora) para o resumo incluir o que foi descarregado.
 pub fn ensure_moodle_synced(config: &Json, log: &dyn Fn(&str)) {
     let Some(dir) = moodle_dir_of(config) else { return };
+    if config.get("moodle_auto_download").and_then(Value::as_bool) == Some(false) {
+        return; // o utilizador desativou o descarregamento automático
+    }
+    let Some(base) = crate::institutions::moodle_url(config) else {
+        log("Moodle: falta o endereço da instituição; nada descarregado.");
+        return;
+    };
     let lock = paths::sync_lock(Some(&dir));
     let mut waited = Duration::ZERO;
     while lock.exists() && waited < MOODLE_SYNC_TIMEOUT {
@@ -148,7 +155,7 @@ pub fn ensure_moodle_synced(config: &Json, log: &dyn Fn(&str)) {
         return;
     }
     log("A sincronizar o Moodle antes de gerar o resumo...");
-    moodle_sync::run_sync("scheduled", Some(&dir), None, None);
+    moodle_sync::run_sync("scheduled", Some(&dir), Some(&base), None);
 }
 
 fn moodle_section(config: &Json, fallback_since: NaiveDateTime, log: &dyn Fn(&str)) -> (Vec<String>, usize) {

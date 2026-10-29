@@ -129,7 +129,7 @@ fn missing_inbox_and_unsupported_method_give_clear_errors() {
     let none = mail::get_emails(&json_map(json!({})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });
     std::env::remove_var("ISEP_THUNDERBIRD_PROFILES");
     assert!(none.unwrap_err().contains("Caixa de entrada do Thunderbird não encontrada"));
-    let other = mail::get_emails(&json_map(json!({"email_method": "imap"})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });
+    let other = mail::get_emails(&json_map(json!({"email_method": "pop3"})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });
     assert!(other.unwrap_err().contains("ainda não está disponível"));
 }
 

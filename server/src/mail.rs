@@ -179,6 +179,16 @@ fn to_email(raw: &[u8], received: NaiveDateTime) -> Option<Email> {
     })
 }
 
+/// Converte uma mensagem em bruto (RFC 822) num email, se tiver sido recebida depois de `since`.
+pub fn email_from_raw(raw: &[u8], since: NaiveDateTime) -> Option<Email> {
+    let header_end = raw.windows(4).position(|w| w == b"\r\n\r\n").or_else(|| raw.windows(2).position(|w| w == b"\n\n")).unwrap_or(raw.len());
+    let time = message_time(header_value(&raw[..header_end], "Date").as_deref());
+    if time < since {
+        return None;
+    }
+    to_email(raw, time)
+}
+
 /// Lê um ficheiro mbox e devolve os emails recebidos depois de `since` (mais recentes primeiro).
 pub fn read_mbox(path: &Path, since: NaiveDateTime) -> std::io::Result<Vec<Email>> {
     let mut reader = BufReader::new(std::fs::File::open(path)?);
@@ -257,34 +267,13 @@ impl MailSource for ThunderbirdSource {
     }
 }
 
-/// Serviço próprio da app: Microsoft Graph com início de sessão por código de dispositivo.
-pub struct GraphSource;
-impl MailSource for GraphSource {
-    fn id(&self) -> &'static str {
-        "graph"
-    }
-    fn fetch(&self, config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
-        if opts.sync && !wait_for_internet(Duration::from_secs(30)) {
-            return Err("Sem ligação à Internet. A abortar sem avançar a data de última execução.".into());
-        }
-        let (emails, rotated) = crate::graph::fetch_inbox(config, since)?;
-        if let Some(token) = rotated {
-            // a Microsoft roda o token de renovação: grava o novo para a próxima execução
-            let mut fresh = crate::config::load_config();
-            if crate::graph::store_refresh_token(&mut fresh, &token).is_ok() {
-                let _ = crate::config::save_config(&fresh);
-            }
-        }
-        Ok(emails)
-    }
-}
-
-/// Nomes aceites em `email_method` (`outlook` é o nome antigo da versão Python para o mesmo serviço).
+/// Nomes aceites em `email_method`. `imap` é o serviço próprio da app; `graph`/`outlook` eram nomes de uma versão anterior
+/// da mesma ideia e passam a apontar para ele.
 pub fn source_for(method: &str) -> Result<Box<dyn MailSource>, String> {
     match method.to_lowercase().as_str() {
         "thunderbird" => Ok(Box::new(ThunderbirdSource)),
-        "graph" | "outlook" => Ok(Box::new(GraphSource)),
-        other => Err(format!("O método de email '{other}' ainda não está disponível na versão Rust (usa 'thunderbird' ou 'graph').")),
+        "imap" | "graph" | "outlook" => Ok(Box::new(crate::imap::ImapSource)),
+        other => Err(format!("O método de email '{other}' ainda não está disponível na versão Rust (usa 'imap' ou 'thunderbird').")),
     }
 }
 

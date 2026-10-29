@@ -1,7 +1,7 @@
 // Tipos do contrato da API local (ver docs/API.md). Os campos de segredo são só de escrita.
 
 export type JobStatus = 'running' | 'done' | 'failed'
-export type EmailMethod = 'thunderbird' | 'graph'
+export type EmailMethod = 'thunderbird' | 'imap'
 export type HistoryKind = 'digest' | 'moodle_sync'
 export type SummaryMode = 'rules' | 'ai'
 export type AiProvider = 'cli' | 'api'
@@ -115,17 +115,49 @@ export interface Settings {
     ai_api_key_set: boolean
     ai_api_key_env: string
     ai_api_key_env_set: boolean
+    rules: SummaryRules
   }
   schedule: { time: string }
   destination: { session_recipients: string[]; session_configured: boolean }
   email: { method: EmailMethod; address: string; connected: boolean }
   setup: { done: boolean }
-  moodle: { sync_dir: string; download_dir: string }
+  student: Student
+  moodle: {
+    sync_dir: string
+    download_dir: string
+    default_download_dir: string
+    download_dir_is_default: boolean
+    auto_download: boolean
+    /** Endereço do Moodle a usar (`null` se a instituição não tem um conhecido e ainda não foi indicado). */
+    url: string | null
+    url_source: 'custom' | 'institution' | 'default' | 'missing'
+  }
+}
+
+export interface SummaryRules {
+  important_keywords: string[]
+  ignore_senders: string[]
+  ignore_subjects: string[]
+}
+
+export interface Student {
+  institution_id: string
+  institution_name: string
+  course: string
+  year: number
+  configured: boolean
+}
+
+export interface Institution {
+  id: string
+  name: string
+  has_moodle: boolean
 }
 
 /** Alteração parcial: mesma forma que `Settings` mais os campos só de escrita. */
 export interface SettingsPatch {
-  summary?: Partial<Omit<Settings['summary'], 'ai_api_key_set' | 'ai_api_key_env' | 'ai_api_key_env_set'>> & {
+  summary?: Partial<Omit<Settings['summary'], 'ai_api_key_set' | 'ai_api_key_env' | 'ai_api_key_env_set' | 'rules'>> & {
+    rules?: Partial<SummaryRules>
     ai_api_key?: string
     clear_ai_api_key?: boolean
   }
@@ -133,7 +165,8 @@ export interface SettingsPatch {
   destination?: { session_id?: string }
   email?: { method?: EmailMethod; address?: string }
   setup?: { done?: boolean }
-  moodle?: Partial<Settings['moodle']>
+  moodle?: { sync_dir?: string; download_dir?: string; url?: string; auto_download?: boolean }
+  student?: { institution_id?: string; institution_name?: string; course?: string; year?: number }
 }
 
 export interface SettingsUpdateResult {
@@ -244,6 +277,13 @@ export interface DeviceLogin {
   verification_uri: string
   interval: number
   expires_in: number
+}
+
+export interface SessionAccount {
+  session_id: string
+  /** Frase de recuperação: só se mostra uma vez, a app não a guarda. */
+  mnemonic: string
+  state: SessionState
 }
 
 export type DevicePoll = { status: 'pending' } | { status: 'done' } | { status: 'failed'; message: string }

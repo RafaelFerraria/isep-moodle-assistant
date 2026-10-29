@@ -5,4 +5,5 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('isepBridge', {
   request: (method, path, body) => ipcRenderer.invoke('isep:request', method, path, body),
   backend: () => ipcRenderer.invoke('isep:backend'),
+  pickFolder: () => ipcRenderer.invoke('isep:pickFolder'),
 })

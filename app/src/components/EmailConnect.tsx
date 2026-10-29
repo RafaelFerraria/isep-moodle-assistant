@@ -9,7 +9,18 @@ import { Button, Notice } from './ui'
  * Liga a conta Microsoft do ISEP à app (serviço próprio de email). Mostra o código, espera que o utilizador o
  * escreva em microsoft.com/devicelogin e consulta o servidor até a autorização ser concluída.
  */
-export function EmailConnect({ connected, onConnected }: { connected: boolean; onConnected: () => void }) {
+export function EmailConnect({
+  connected,
+  onConnected,
+  beforeStart,
+  disabled = false,
+}: {
+  connected: boolean
+  onConnected: () => void
+  /** Corre antes de pedir o código (ex.: gravar o endereço). Se lançar, não avança. */
+  beforeStart?: () => Promise<void>
+  disabled?: boolean
+}) {
   const { api, pollMs } = useApp()
   const [login, setLogin] = useState<DeviceLogin | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,12 +66,14 @@ export function EmailConnect({ connected, onConnected }: { connected: boolean; o
     setBusy(true)
     setError(null)
     try {
+      if (beforeStart) await beforeStart()
       const l = await api.startEmailConnect()
       if (!alive.current) return
       setLogin(l)
       poll(l)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      // o erro de `beforeStart` já foi mostrado por quem o lançou
+      if (!beforeStart || e instanceof ApiError) setError(e instanceof ApiError ? e.message : String(e))
     } finally {
       if (alive.current) setBusy(false)
     }
@@ -68,7 +81,7 @@ export function EmailConnect({ connected, onConnected }: { connected: boolean; o
 
   return (
     <div className="space-y-3">
-      {connected && !login && <Notice tone="good">Conta Microsoft ligada. Os emails são lidos diretamente, sem o Thunderbird.</Notice>}
+      {connected && !login && <Notice tone="good">Email ligado. A app lê a tua caixa diretamente, sem precisar de mais nenhum programa.</Notice>}
       {login ? (
         <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/40">
           <p className="text-sm text-slate-800 dark:text-slate-200">
@@ -77,15 +90,15 @@ export function EmailConnect({ connected, onConnected }: { connected: boolean; o
               {login.verification_uri.replace('https://', '')} <ExternalLink className="size-3.5" aria-hidden />
             </a>
           </p>
-          <p className="text-sm text-slate-800 dark:text-slate-200">2. Escreve este código e entra com a tua conta do ISEP:</p>
+          <p className="text-sm text-slate-800 dark:text-slate-200">2. Escreve este código e entra com o email da tua escola:</p>
           <p aria-label="Código de autorização" className="select-all font-mono text-2xl font-semibold tracking-widest text-slate-900 dark:text-slate-100">
             {login.user_code}
           </p>
           <p className="text-xs text-slate-500">À espera da tua autorização…</p>
         </div>
       ) : (
-        <Button onClick={() => void start()} loading={busy} icon={<Mail className="size-4" />}>
-          {connected ? 'Ligar outra vez' : 'Ligar a conta Microsoft do ISEP'}
+        <Button onClick={() => void start()} loading={busy} disabled={disabled} icon={<Mail className="size-4" />}>
+          {connected ? 'Ligar outra vez' : 'Ligar o meu email'}
         </Button>
       )}
       {error && <Notice tone="bad">{error}</Notice>}

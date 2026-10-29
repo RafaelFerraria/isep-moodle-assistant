@@ -166,3 +166,21 @@ pub fn remove_recipient(index: usize) -> Result<(), String> {
 pub fn send_test(log: &dyn Fn(&str)) -> bool {
     send_to_session("✅ ISEP Assistant: o envio para o Session está a funcionar.", &load_config(), log)
 }
+
+/// Cria uma conta de Session nova para o utilizador (para quem ainda não tem). A frase de recuperação é devolvida UMA vez,
+/// para ele a guardar e restaurar a conta na app do Session; a app nunca a guarda, só o ID, que passa a ser destinatário.
+pub fn create_account() -> Result<Value, String> {
+    let node = require_sender()?;
+    let mut cmd = node.command();
+    cmd.arg(paths::session_script()).arg("--generate");
+    let out = run_with_timeout(cmd, None, Duration::from_secs(60)).map_err(|e| format!("não foi possível correr o Node.js: {e}"))?;
+    if out.timed_out || out.status != Some(0) {
+        return Err(format!("Falha ao criar a conta do Session: {}", out.stderr.trim().chars().take(200).collect::<String>()));
+    }
+    let acc: Value = serde_json::from_str(out.stdout.trim().lines().last().unwrap_or("")).map_err(|_| "Resposta inesperada ao criar a conta.".to_string())?;
+    let (Some(mnemonic), Some(id)) = (acc["mnemonic"].as_str(), acc["sessionId"].as_str()) else {
+        return Err("Resposta inesperada ao criar a conta.".into());
+    };
+    add_recipient(id)?;
+    Ok(json!({"session_id": id, "mnemonic": mnemonic, "state": state(&load_config())}))
+}

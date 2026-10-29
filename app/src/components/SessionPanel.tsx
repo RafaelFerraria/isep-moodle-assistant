@@ -1,7 +1,7 @@
 import { Bot, Copy, Send, Trash2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { ApiError } from '../api'
-import type { SessionState } from '../api'
+import type { SessionAccount, SessionState } from '../api'
 import { useApp } from '../lib/context'
 import { useAsync, useJobRunner } from '../lib/hooks'
 import { JobPanel } from './JobPanel'
@@ -45,6 +45,8 @@ export function SessionPanel({ onChange }: { onChange?: (s: SessionState) => voi
   const [manualId, setManualId] = useState('')
   const [manualError, setManualError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [account, setAccount] = useState<SessionAccount | null>(null)
+  const [creatingAccount, setCreatingAccount] = useState(false)
 
   if (session.loading && !session.data) {
     return (
@@ -88,6 +90,19 @@ export function SessionPanel({ onChange }: { onChange?: (s: SessionState) => voi
       await session.reload()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
+    }
+  }
+
+  const createAccount = async () => {
+    setCreatingAccount(true)
+    setError(null)
+    try {
+      setAccount(await api.createSessionAccount())
+      await session.reload()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setCreatingAccount(false)
     }
   }
 
@@ -148,6 +163,33 @@ export function SessionPanel({ onChange }: { onChange?: (s: SessionState) => voi
                 Detetar o meu Session
               </Button>
               <JobPanel runner={pair} />
+              <details className="text-sm">
+                <summary className="cursor-pointer text-slate-600 dark:text-slate-400">Ainda não tenho o Session</summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-slate-600 dark:text-slate-400">
+                    A app cria-te uma conta de Session. Depois instalas o Session (getsession.org) e restauras a conta com uma frase de recuperação que vou mostrar.
+                  </p>
+                  <Button onClick={() => void createAccount()} loading={creatingAccount} disabled={!s.node_ok || !s.script_ok}>
+                    Criar a minha conta Session
+                  </Button>
+                </div>
+              </details>
+              {account && (
+                <div role="alert" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Guarda esta frase agora. Só a vês uma vez e a app não a guarda.</p>
+                  <p aria-label="Frase de recuperação" className="select-all rounded-lg bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+                    {account.mnemonic}
+                  </p>
+                  <ol className="list-inside list-decimal space-y-1 text-sm text-amber-900 dark:text-amber-200">
+                    <li>Instala o Session (getsession.org) no telemóvel ou no PC.</li>
+                    <li>Escolhe «Restaurar conta» e cola a frase acima.</li>
+                    <li>Aceita o pedido de mensagem do bot quando chegar o primeiro resumo.</li>
+                  </ol>
+                  <Button variant="secondary" onClick={() => setAccount(null)}>
+                    Já guardei a frase
+                  </Button>
+                </div>
+              )}
               <details className="text-sm">
                 <summary className="cursor-pointer text-slate-600 dark:text-slate-400">Prefiro colar o meu Session ID</summary>
                 <div className="mt-3 flex flex-wrap items-end gap-3">

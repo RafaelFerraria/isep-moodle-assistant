@@ -107,12 +107,12 @@ fn emails_page_reads_the_configured_source_and_marks_sent_ones() {
 #[test]
 fn emails_page_reports_a_source_that_is_not_ready_instead_of_failing() {
     let _home = Home::new();
-    save_config(&json_map(json!({"email_method": "graph"}))).unwrap();
+    save_config(&json_map(json!({"email_method": "imap", "email_address": "a@escola.pt"}))).unwrap();
     let r = call("GET", "/emails", None);
     assert_eq!(r.status, 200);
     assert!(r.body["error"].as_str().unwrap().contains("ainda não foi ligada"), "{}", r.body);
-    save_config(&json_map(json!({"email_method": "imap"}))).unwrap();
-    assert!(call("GET", "/emails", None).body["error"].as_str().unwrap().contains("imap"));
+    save_config(&json_map(json!({"email_method": "pop3"}))).unwrap();
+    assert!(call("GET", "/emails", None).body["error"].as_str().unwrap().contains("pop3"));
 }
 
 #[cfg(windows)]
@@ -147,52 +147,12 @@ fn microsoft_account_connects_with_a_device_code_and_the_token_is_stored_encrypt
     std::env::remove_var("ISEP_MS_LOGIN_URL");
     assert_eq!(done.body["status"], "done", "{}", done.body);
     let cfg = load_config();
-    assert_eq!(cfg["email_method"], "graph");
+    assert_eq!(cfg["email_method"], "imap");
     let stored = cfg["ms_refresh_token"].as_str().unwrap();
     assert!(!stored.contains("rt-secreto") && stored.chars().all(|c| c.is_ascii_hexdigit()), "o token tem de ir cifrado");
     let public = call("GET", "/settings", None).body;
     assert_eq!(public["email"]["connected"], true);
     assert!(!public.to_string().contains("rt-secreto"));
-}
-
-#[cfg(windows)]
-#[test]
-fn graph_source_reads_the_inbox_and_keeps_a_rotated_refresh_token() {
-    let _home = Home::new();
-    let login = fake_server(|_| Reply::json(200, json!({"access_token": "at-1", "refresh_token": "rt-novo"})));
-    let graph = fake_server(|req| {
-        assert!(req.header("authorization") == Some("Bearer at-1"), "{:?}", req.headers);
-        Reply::json(200, json!({"value": [
-            {"internetMessageId": "<g1@isep>", "subject": "Prazo do PI", "from": {"emailAddress": {"name": "Docente", "address": "d@isep.ipp.pt"}},
-             "receivedDateTime": "2026-10-27T09:30:00Z", "bodyPreview": "curto", "body": {"content": "Entrega até sexta."}},
-            {"internetMessageId": "<g2@isep>", "subject": "", "from": {"emailAddress": {"address": "x@isep.ipp.pt"}},
-             "receivedDateTime": "2026-10-27T08:00:00Z", "bodyPreview": "só a pré-visualização"}
-        ]}))
-    });
-    std::env::set_var("ISEP_MS_LOGIN_URL", &login.base);
-    std::env::set_var("ISEP_GRAPH_URL", &graph.base);
-    let mut cfg = json_map(json!({"email_method": "graph"}));
-    isep_assistant::graph::store_refresh_token(&mut cfg, "rt-velho").unwrap();
-    save_config(&cfg).unwrap();
-
-    let source = isep_assistant::mail::source_for("outlook").unwrap();
-    assert_eq!(source.id(), "graph", "«outlook» é o nome antigo do mesmo serviço");
-    let since = (Local::now() - Dur::days(2)).naive_local();
-    let emails = source.fetch(&load_config(), since, isep_assistant::mail::FetchOptions { sync: false });
-    std::env::remove_var("ISEP_MS_LOGIN_URL");
-    std::env::remove_var("ISEP_GRAPH_URL");
-    let emails = emails.unwrap();
-    assert_eq!(emails.len(), 2);
-    assert_eq!(emails[0].subject, "Prazo do PI");
-    assert_eq!(emails[0].sender, "\"Docente\" <d@isep.ipp.pt>");
-    assert_eq!(emails[0].message_id, "<g1@isep>");
-    assert_eq!(emails[0].body, "Entrega até sexta.");
-    assert_eq!(emails[1].subject, "Sem assunto");
-    assert_eq!(emails[1].body, "só a pré-visualização");
-    let rotated = isep_assistant::dpapi::decrypt(load_config()["ms_refresh_token"].as_str().unwrap()).unwrap();
-    assert_eq!(rotated, "rt-novo", "o token novo tem de ficar guardado");
-    let url = &graph.requests()[0].url;
-    assert!(url.contains("receivedDateTime") && url.contains("inbox"), "{url}");
 }
 
 // ---------------------------------------------------------------- ficheiros do Moodle
@@ -287,7 +247,7 @@ fn setup_wizard_state_and_existing_installs_skip_it() {
     let setup = call("GET", "/setup", None).body;
     assert_eq!(setup["ready"], false);
     let ids: Vec<&str> = setup["steps"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, vec!["email", "moodle", "session", "summary", "schedule"]);
+    assert_eq!(ids, vec!["profile", "email", "moodle", "session", "summary", "schedule"]);
 
     let r = call("PUT", "/settings", Some(json!({"setup": {"done": true}})));
     assert_eq!(r.status, 200);
@@ -302,11 +262,11 @@ fn setup_wizard_state_and_existing_installs_skip_it() {
 #[test]
 fn email_settings_accept_only_known_methods() {
     let _home = Home::new();
-    assert_eq!(call("PUT", "/settings", Some(json!({"email": {"method": "graph", "address": "1234567@isep.ipp.pt"}}))).status, 200);
+    assert_eq!(call("PUT", "/settings", Some(json!({"email": {"method": "imap", "address": "1234567@isep.ipp.pt"}}))).status, 200);
     let s = call("GET", "/settings", None).body;
-    assert_eq!(s["email"]["method"], "graph");
+    assert_eq!(s["email"]["method"], "imap");
     assert_eq!(s["email"]["address"], "1234567@isep.ipp.pt");
-    assert_eq!(call("PUT", "/settings", Some(json!({"email": {"method": "imap"}}))).status, 422);
+    assert_eq!(call("PUT", "/settings", Some(json!({"email": {"method": "pop3"}}))).status, 422);
     assert_eq!(call("PUT", "/settings", Some(json!({"email": {"address": "sem-arroba"}}))).status, 422);
 }
 

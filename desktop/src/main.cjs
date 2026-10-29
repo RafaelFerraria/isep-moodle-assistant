@@ -1,5 +1,5 @@
 'use strict'
-const { app, BrowserWindow, ipcMain, shell, session } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, shell, session } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const { httpRequest, startBackend } = require('./backend.cjs')
@@ -73,6 +73,13 @@ ipcMain.handle('isep:request', async (_event, method, urlPath, body) => {
       throw new Error(e2.message || e.message)
     }
   }
+})
+
+// Seletor de pastas do sistema (a página não pode abri-lo sozinha). Devolve o caminho ou null se cancelar.
+ipcMain.handle('isep:pickFolder', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const r = await dialog.showOpenDialog(win, { title: 'Escolhe a pasta dos downloads', properties: ['openDirectory', 'createDirectory'] })
+  return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
 })
 
 ipcMain.handle('isep:backend', async () => {

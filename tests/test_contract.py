@@ -132,7 +132,8 @@ def test_status_shape_and_content(server):
     code, st, _ = get(server, "/status")
     assert code == 200
     assert {"version", "now", "ok", "checks", "summary_mode", "digest", "moodle", "tasks", "active_job"} <= set(st)
-    assert {c["id"] for c in st["checks"]} == {"config", "session", "thunderbird", "node", "moodle", "tasks", "internet", "ai"}
+    # «email» (email da escola ligado) é uma verificação só do servidor Rust
+    assert {c["id"] for c in st["checks"]} - {"email"} == {"config", "session", "thunderbird", "node", "moodle", "tasks", "internet", "ai"}
     for c in st["checks"]:
         assert set(c) == {"id", "label", "ok", "detail", "required"}
     assert st["digest"]["next_run"] == "2026-10-27T18:00:00" and st["digest"]["scheduled_time"] == "18:00"
@@ -144,8 +145,9 @@ def test_settings_shape_masking_and_roundtrip(server):
     code, s, _ = get(server, "/settings")
     assert code == 200
     # «setup» (assistente de configuração) só existe no servidor Rust: o Python é a versão anterior e não o ganha
-    assert set(s) - {"setup"} == {"summary", "schedule", "destination", "email", "moodle"}
-    assert set(s["summary"]) == {"mode", "ai_provider", "ai_cli", "ai_cli_command", "ai_api_type", "ai_model", "ai_base_url",
+    assert set(s) - {"setup", "student"} == {"summary", "schedule", "destination", "email", "moodle"}
+    # «rules» (regras editáveis) também só existe no servidor Rust
+    assert set(s["summary"]) - {"rules"} == {"mode", "ai_provider", "ai_cli", "ai_cli_command", "ai_api_type", "ai_model", "ai_base_url",
                                  "ai_api_key_set", "ai_api_key_env", "ai_api_key_env_set"}
     assert s["destination"]["session_configured"] is True
     assert SID not in json.dumps(s) and "segredo" not in json.dumps(s)

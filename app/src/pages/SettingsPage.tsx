@@ -1,10 +1,15 @@
-import { Bell, Bot, CheckCircle2, CircleDashed, Cpu, KeyRound, Mail, Save, Shield, TestTube2, Undo2, XCircle } from 'lucide-react'
+import { Bell, Bot, CheckCircle2, CircleDashed, Cpu, KeyRound, Save, Shield, TestTube2, Undo2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError } from '../api'
-import type { AiApiType, AiCli, AiProvider, Check, EmailMethod, Settings, SettingsPatch, SettingsUpdateResult, SummaryMode, SummaryTestResult } from '../api'
-import { EmailConnect } from '../components/EmailConnect'
+import type { AiApiType, AiCli, AiProvider, Check, Settings, SettingsPatch, SettingsUpdateResult, SummaryMode, SummaryTestResult } from '../api'
+import { EmailSetup } from '../components/EmailSetup'
 import { MoodleCredentials } from '../components/MoodleCredentials'
+import { MoodleSetup } from '../components/MoodleSetup'
+import { RulesEditor, textToList, rulesToText, validateRules } from '../components/RulesEditor'
+import type { RulesText } from '../components/RulesEditor'
+import { StudentFields, validateStudent } from '../components/StudentFields'
+import type { StudentValue } from '../components/StudentFields'
 import { Badge, Button, Card, Choice, Field, Notice, Pre, Select, Spinner, TextInput } from '../components/ui'
 import { useApp } from '../lib/context'
 import { useAsync } from '../lib/hooks'
@@ -22,10 +27,9 @@ export interface Draft {
   newApiKey: string
   clearApiKey: boolean
   time: string
-  emailMethod: EmailMethod
-  emailAddress: string
+  rules: RulesText
+  student: StudentValue
   sessionId: string
-  downloadDir: string
   syncDir: string
 }
 
@@ -42,10 +46,9 @@ export function toDraft(s: Settings): Draft {
     newApiKey: '',
     clearApiKey: false,
     time: s.schedule.time,
-    emailMethod: s.email.method,
-    emailAddress: s.email.address,
+    rules: rulesToText(s.summary.rules),
+    student: { institutionId: s.student.institution_id, institutionName: s.student.institution_id === 'outra' ? s.student.institution_name : '', course: s.student.course, year: s.student.year },
     sessionId: '',
-    downloadDir: s.moodle.download_dir,
     syncDir: s.moodle.sync_dir,
   }
 }
@@ -64,15 +67,22 @@ export function buildPatch(s: Settings, d: Draft): SettingsPatch {
   if (d.aiBaseUrl !== cur.aiBaseUrl) summary.ai_base_url = d.aiBaseUrl
   if (d.newApiKey.trim()) summary.ai_api_key = d.newApiKey.trim()
   else if (d.clearApiKey) summary.clear_ai_api_key = true
-  if (Object.keys(summary).length) patch.summary = summary
   if (d.time !== cur.time) patch.schedule = { time: d.time }
-  const email: NonNullable<SettingsPatch['email']> = {}
-  if (d.emailMethod !== cur.emailMethod) email.method = d.emailMethod
-  if (d.emailAddress.trim() !== cur.emailAddress) email.address = d.emailAddress.trim()
-  if (Object.keys(email).length) patch.email = email
+  const rules: NonNullable<NonNullable<SettingsPatch['summary']>['rules']> = {}
+  for (const key of ['important_keywords', 'ignore_senders', 'ignore_subjects'] as const) {
+    const next = textToList(d.rules[key])
+    if (JSON.stringify(next) !== JSON.stringify(textToList(cur.rules[key]))) rules[key] = next
+  }
+  if (Object.keys(rules).length) summary.rules = rules
+  if (Object.keys(summary).length) patch.summary = summary
+  const student: NonNullable<SettingsPatch['student']> = {}
+  if (d.student.institutionId !== cur.student.institutionId) student.institution_id = d.student.institutionId
+  if (d.student.institutionId === 'outra' && d.student.institutionName.trim() !== cur.student.institutionName.trim()) student.institution_name = d.student.institutionName.trim()
+  if (d.student.course.trim() !== cur.student.course.trim()) student.course = d.student.course.trim()
+  if (d.student.year !== cur.student.year) student.year = d.student.year
+  if (Object.keys(student).length) patch.student = student
   if (d.sessionId.trim()) patch.destination = { session_id: d.sessionId.trim() }
   const moodle: NonNullable<SettingsPatch['moodle']> = {}
-  if (d.downloadDir !== cur.downloadDir) moodle.download_dir = d.downloadDir
   if (d.syncDir !== cur.syncDir) moodle.sync_dir = d.syncDir
   if (Object.keys(moodle).length) patch.moodle = moodle
   return patch
@@ -87,7 +97,7 @@ const DEFAULT_MODEL: Record<AiApiType, string> = {
 
 // ------------------------------------------------------------------ secções
 
-function SummarySection({ s, d, set, errors }: { s: Settings; d: Draft; set: (p: Partial<Draft>) => void; errors: Record<string, string> }) {
+export function SummarySection({ s, d, set, errors }: { s: Settings; d: Draft; set: (p: Partial<Draft>) => void; errors: Record<string, string> }) {
   const keyStored = s.summary.ai_api_key_set && !d.clearApiKey
   const [replacing, setReplacing] = useState(false)
   return (
@@ -103,6 +113,8 @@ function SummarySection({ s, d, set, errors }: { s: Settings; d: Draft; set: (p:
           ]}
         />
         {errors['summary.mode'] && <p role="alert" className="text-xs text-rose-600">{errors['summary.mode']}</p>}
+
+        {d.mode === 'rules' && <RulesEditor value={d.rules} onChange={(rules) => set({ rules })} serverErrors={errors} />}
 
         {d.mode === 'ai' && (
           <div className="space-y-5 border-t border-slate-100 pt-5 dark:border-slate-800">
@@ -189,7 +201,7 @@ function SummarySection({ s, d, set, errors }: { s: Settings; d: Draft; set: (p:
   )
 }
 
-function TestSection({ dirty, mode }: { dirty: boolean; mode: SummaryMode }) {
+export function TestSection({ dirty, mode }: { dirty: boolean; mode: SummaryMode }) {
   const { api } = useApp()
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<SummaryTestResult | null>(null)
@@ -217,36 +229,6 @@ function TestSection({ dirty, mode }: { dirty: boolean; mode: SummaryMode }) {
         {result && result.ai_fallback && <Notice tone="warn">A IA não respondeu; o resumo caiu para o modo Regras. Confirma o login da CLI ou o token.</Notice>}
         {result && result.ok && result.ai_requested && <Notice tone="good">A IA respondeu corretamente.</Notice>}
         {result && <Pre label="Resumo de exemplo">{result.text}</Pre>}
-      </div>
-    </Card>
-  )
-}
-
-function EmailSection({ s, d, set, errors, onConnected }: { s: Settings; d: Draft; set: (p: Partial<Draft>) => void; errors: Record<string, string>; onConnected: () => void }) {
-  return (
-    <Card title="Emails" subtitle="De onde a app lê os emails do ISEP. Só lê; nunca apaga nem envia.">
-      <div className="space-y-5">
-        <Choice<EmailMethod>
-          legend="Origem dos emails"
-          value={d.emailMethod}
-          onChange={(emailMethod) => set({ emailMethod })}
-          options={[
-            { value: 'thunderbird', title: 'Thunderbird', description: 'Lê a caixa de entrada do Thunderbird neste PC. Funciona sem aprovações.', icon: <Mail className="size-5" /> },
-            { value: 'graph', title: 'Conta do ISEP (serviço da app)', description: 'Experimental: liga-se à conta Microsoft sem Thunderbird. Pode exigir aprovação de um administrador do ISEP.', icon: <Mail className="size-5" /> },
-          ]}
-        />
-        {errors['email.method'] && <p role="alert" className="text-xs text-rose-600">{errors['email.method']}</p>}
-        {d.emailMethod === 'graph' &&
-          (s.email.method === 'graph' ? (
-            <EmailConnect connected={s.email.connected} onConnected={onConnected} />
-          ) : (
-            <p className="text-xs text-slate-500">Guarda as alterações para poderes ligar a conta.</p>
-          ))}
-        <div className="max-w-md">
-          <Field label="O teu email do ISEP" error={errors['email.address']}>
-            {(p) => <TextInput {...p} type="email" value={d.emailAddress} onChange={(e) => set({ emailAddress: e.target.value })} placeholder="numero@isep.ipp.pt" />}
-          </Field>
-        </div>
       </div>
     </Card>
   )
@@ -360,8 +342,10 @@ export function SettingsPage() {
     }
   }
 
+  const localErrors = { ...validateRules(draft.rules), ...(draft.student.institutionId ? validateStudent(draft.student) : {}) }
+  const invalid = Object.keys(localErrors).length > 0
   const shown = new Set(['summary.mode', 'summary.ai_cli', 'summary.ai_cli_command', 'summary.ai_api_type', 'summary.ai_model', 'summary.ai_base_url', 'summary.ai_api_key', 'schedule.time', 'destination.session_id', 'moodle.sync_dir', 'moodle.download_dir', 'email.method', 'email.address'])
-  const orphan = Object.entries(errors).filter(([k]) => !shown.has(k) || (draft.mode === 'rules' && k.startsWith('summary.ai')))
+  const orphan = Object.entries(errors).filter(([k]) => (!shown.has(k) && !k.startsWith('summary.rules.') && !k.startsWith('student.')) || (draft.mode === 'rules' && k.startsWith('summary.ai')))
 
   return (
     <div className="space-y-6 p-6 pb-28 lg:p-8 lg:pb-28">
@@ -370,7 +354,14 @@ export function SettingsPage() {
         <p className="text-sm text-slate-500 dark:text-slate-400">As alterações só se aplicam depois de carregares em «Guardar».</p>
       </header>
 
-      <EmailSection s={s} d={draft} set={set} errors={errors} onConnected={() => { void settings.reload(); void status.reload() }} />
+      <Card title="O teu curso" subtitle="Instituição, curso e ano. Fica guardado só neste PC (mais tarde irá para a tua conta online).">
+        <StudentFields value={draft.student} onChange={(student) => set({ student })} errors={errors} />
+      </Card>
+
+      <Card title="Email" subtitle="A app lê o email da tua escola diretamente, sem precisares de mais nenhum programa.">
+        <EmailSetup email={s.email} onChanged={() => { void settings.reload(); void status.reload() }} />
+      </Card>
+
       <SummarySection s={s} d={draft} set={set} errors={errors} />
       <TestSection dirty={dirty} mode={s.summary.mode} />
 
@@ -399,15 +390,13 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      <MoodleSetup moodle={s.moodle} onChanged={() => { void settings.reload(); void status.reload() }} />
       <MoodleCredentials username={status.data?.moodle.username ?? ''} onSaved={() => void status.reload()} />
 
       {status.data && <ChecksSection checks={status.data.checks} />}
 
       <Card title="Pastas" subtitle="Avançado.">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Pasta dos downloads do Moodle" error={errors['moodle.download_dir']}>
-            {(p) => <TextInput {...p} value={draft.downloadDir} onChange={(e) => set({ downloadDir: e.target.value })} />}
-          </Field>
+        <div className="max-w-xl">
           <Field label="Pasta do sincronizador" error={errors['moodle.sync_dir']}>
             {(p) => <TextInput {...p} value={draft.syncDir} onChange={(e) => set({ syncDir: e.target.value })} />}
           </Field>
@@ -416,7 +405,7 @@ export function SettingsPage() {
 
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 px-6 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 lg:left-64">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
-          <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!dirty} icon={<Save className="size-4" />}>
+          <Button variant="primary" onClick={() => void save()} loading={saving} disabled={!dirty || invalid} icon={<Save className="size-4" />}>
             Guardar alterações
           </Button>
           <Button variant="ghost" onClick={() => { setDraft(toDraft(s)); setErrors({}); setResult(null) }} disabled={!dirty || saving} icon={<Undo2 className="size-4" />}>
@@ -435,7 +424,8 @@ export function SettingsPage() {
                 {result.reschedule && (result.reschedule.ok ? ' Agenda do Windows atualizada.' : ` Não foi possível atualizar a agenda do Windows: ${result.reschedule.message}`)}
               </span>
             )}
-            {!dirty && !result && !failure && <span className="text-slate-500">Sem alterações por guardar.</span>}
+            {invalid && <span role="alert" className="text-rose-600">Corrige os campos assinalados para poderes guardar.</span>}
+            {!dirty && !result && !failure && !invalid && <span className="text-slate-500">Sem alterações por guardar.</span>}
           </div>
         </div>
       </div>

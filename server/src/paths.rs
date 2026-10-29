@@ -53,18 +53,27 @@ pub fn embedded_resources() -> Option<PathBuf> {
     (dir.join("session").is_dir() && dir.join("bin").is_dir()).then_some(dir)
 }
 
-/// O `session_sender.cjs`: `ISEP_SESSION_SCRIPT` (testes), o que vem dentro da app ou, em desenvolvimento, o da pasta de dados.
-pub fn session_script() -> PathBuf {
-    if let Some(v) = env::var_os("ISEP_SESSION_SCRIPT") {
+/// Um script que corre no motor embutido: a variável `env_var` (testes), o que vem dentro da app ou, em desenvolvimento, o da pasta de dados.
+fn script(env_var: &str, name: &str) -> PathBuf {
+    if let Some(v) = env::var_os(env_var) {
         return PathBuf::from(v);
     }
     if let Some(res) = embedded_resources() {
-        let inside = res.join("session").join("session_sender.cjs");
+        let inside = res.join("session").join(name);
         if inside.exists() {
             return inside;
         }
     }
-    email_dir().join("session_sender.cjs")
+    email_dir().join(name)
+}
+
+pub fn session_script() -> PathBuf {
+    script("ISEP_SESSION_SCRIPT", "session_sender.cjs")
+}
+
+/// Leitor de email (IMAP).
+pub fn mail_script() -> PathBuf {
+    script("ISEP_MAIL_SCRIPT", "mail_fetcher.cjs")
 }
 /// Programa e argumentos que o Agendador de Tarefas executa: este mesmo executável, com a raiz de dados fixada
 /// (a tarefa não herda o ambiente nem a pasta de trabalho da app).

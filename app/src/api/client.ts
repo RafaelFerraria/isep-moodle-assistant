@@ -1,6 +1,7 @@
 import type { Transport } from './transport'
 import type {
   Activity,
+  Institution,
   DeviceLogin,
   DevicePoll,
   DigestResult,
@@ -12,6 +13,7 @@ import type {
   MoodleFiles,
   NewFile,
   Overview,
+  SessionAccount,
   SessionState,
   SetupState,
   Settings,
@@ -103,6 +105,9 @@ export class AssistantApi {
   moodleFiles = (limit = 100) => this.call<MoodleFiles>('GET', `/moodle/files?limit=${limit}`)
   activity = (days = 7) => this.call<Activity>('GET', `/activity?days=${days}`)
   setup = () => this.call<SetupState>('GET', '/setup')
+  institutions = () => this.call<{ items: Institution[] }>('GET', '/institutions')
+  probeMoodle = (url: string) => this.call<{ ok: boolean; url: string }>('POST', '/moodle/probe', { url })
+  createSessionAccount = () => this.call<SessionAccount>('POST', '/session/account')
 
   session = () => this.call<SessionState>('GET', '/session')
   createSessionBot = (force = false) => this.call<SessionState>('POST', '/session/bot', { force })
