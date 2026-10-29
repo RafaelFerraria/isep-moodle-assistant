@@ -12,7 +12,12 @@ pub const IS_WINDOWS: bool = cfg!(windows);
 
 // ---------------------------------------------------------------- verificações simples
 
+/// O Thunderbird da app, se estiver instalado, senão o do sistema.
 pub fn find_thunderbird_path() -> Option<PathBuf> {
+    crate::thunderbird::embedded_exe().or_else(find_system_thunderbird_path)
+}
+
+pub fn find_system_thunderbird_path() -> Option<PathBuf> {
     let env = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
     let candidates = [
         PathBuf::from(env("ProgramFiles", "C:\\Program Files")).join("Mozilla Thunderbird").join("thunderbird.exe"),

@@ -16,7 +16,7 @@ fn utc_to_local(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> chrono::Nai
 
 const MBOX: &str = "From - Mon Oct 26 18:53:04 2026\n\
 Subject: =?UTF-8?B?U0VNXzNfUEkgMjAyNi8yMDI3OiBBUlFDUCAtIGZ1bsOnw7VlcyBwb3IgZ3J1cG8=?=\n\
-From: \"DIAS 1251344 (via MoodleISEP)\" <1251344@isep.ipp.pt>\n\
+From: \"SILVA 1234567 (via MoodleISEP)\" <1234567@isep.ipp.pt>\n\
 Date: Mon, 26 Oct 2026 18:53:04 +0000\n\
 Message-ID: <abc123@moodle.isep.ipp.pt>\n\
 Content-Type: text/plain; charset=UTF-8\n\
@@ -78,7 +78,7 @@ fn mbox_is_parsed_with_charsets_encoded_headers_and_date_filter() {
     // mais recentes primeiro
     assert_eq!(emails[0].subject, "SEM_3_PI 2026/2027: ARQCP - funções por grupo");
     assert_eq!(emails[0].message_id, "<abc123@moodle.isep.ipp.pt>");
-    assert!(emails[0].sender.contains("DIAS 1251344") && emails[0].sender.contains("1251344@isep.ipp.pt"), "{}", emails[0].sender);
+    assert!(emails[0].sender.contains("SILVA 1234567") && emails[0].sender.contains("1234567@isep.ipp.pt"), "{}", emails[0].sender);
     assert!(emails[0].body.contains("» Fóruns") && emails[0].body.contains("From aqui começa"), "{}", emails[0].body);
     assert_eq!(emails[0].received_time, utc_to_local(2026, 10, 26, 18, 53, 4).format("%Y-%m-%dT%H:%M:%S").to_string());
 
@@ -116,7 +116,7 @@ fn inboxes_are_found_under_the_profiles_dir_and_get_emails_reads_the_newest() {
     write_mbox(&home);
     std::env::set_var("ISEP_THUNDERBIRD_PROFILES", home.path("Profiles"));
     let found = mail::find_thunderbird_inboxes();
-    let emails = mail::get_emails(&json_map(json!({})), local(2026, 10, 20, 0, 0), mail::FetchOptions { sync: false });
+    let emails = mail::get_emails(&json_map(json!({"email_method": "thunderbird"})), local(2026, 10, 20, 0, 0), mail::FetchOptions { sync: false });
     std::env::remove_var("ISEP_THUNDERBIRD_PROFILES");
     assert_eq!(found.len(), 1);
     assert_eq!(emails.unwrap().len(), 3);
@@ -126,7 +126,7 @@ fn inboxes_are_found_under_the_profiles_dir_and_get_emails_reads_the_newest() {
 fn missing_inbox_and_unsupported_method_give_clear_errors() {
     let home = Home::new();
     std::env::set_var("ISEP_THUNDERBIRD_PROFILES", home.path("vazio"));
-    let none = mail::get_emails(&json_map(json!({})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });
+    let none = mail::get_emails(&json_map(json!({"email_method": "thunderbird"})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });
     std::env::remove_var("ISEP_THUNDERBIRD_PROFILES");
     assert!(none.unwrap_err().contains("Caixa de entrada do Thunderbird não encontrada"));
     let other = mail::get_emails(&json_map(json!({"email_method": "pop3"})), local(2026, 1, 1, 0, 0), mail::FetchOptions { sync: false });

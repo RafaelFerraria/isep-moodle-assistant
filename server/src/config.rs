@@ -96,9 +96,13 @@ pub fn public_settings(config: &Json) -> Value {
             "session_configured": !recipients.is_empty() && has_mnemonic,
         },
         "email": {
-            "method": or(config, "email_method", "thunderbird"),
+            "method": or(config, "email_method", "imap"),
             "address": str_of(config, "email_address"),
-            "connected": crate::oauth::is_connected(config),
+            "connected": crate::imap::is_configured(config),
+            "password_set": crate::imap::has_password(config),
+            "oauth_connected": crate::oauth::is_connected(config),
+            "imap_host": str_of(config, "imap_host"),
+            "imap_port": config.get("imap_port").and_then(Value::as_u64).unwrap_or(993),
         },
         "setup": { "done": setup_done(config) },
         "student": student_public(config),
@@ -284,6 +288,42 @@ pub fn apply_settings_patch(config: &Json, patch: &Value) -> Result<(Json, Vec<S
                     new.insert("email_method".into(), json!(m));
                 }
                 None => err(&mut errors, "email.method", &list(&["imap", "thunderbird"])),
+            }
+        }
+        if let Some(v) = email.get("imap_host") {
+            match v.as_str().map(str::trim) {
+                Some(h) if h.is_empty() => {
+                    new.remove("imap_host");
+                }
+                Some(h) if h.len() <= 253 && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') && h.contains('.') => {
+                    new.insert("imap_host".into(), json!(h.to_lowercase()));
+                }
+                _ => err(&mut errors, "email.imap_host", "endereço do servidor inválido (ex.: outlook.office365.com)"),
+            }
+        }
+        if let Some(v) = email.get("imap_port") {
+            match v.as_u64().filter(|p| (1..=65535).contains(p)) {
+                Some(p) => {
+                    new.insert("imap_port".into(), json!(p));
+                }
+                None => err(&mut errors, "email.imap_port", "porta entre 1 e 65535"),
+            }
+        }
+        if email.get("sign_out").and_then(Value::as_bool).unwrap_or(false) {
+            new.remove("ms_refresh_token");
+        }
+        if email.get("clear_password").and_then(Value::as_bool).unwrap_or(false) {
+            new.remove("email_password_enc");
+            new.remove("email_password");
+        }
+        if let Some(v) = email.get("password") {
+            match v.as_str() {
+                Some(p) if !p.is_empty() && p.len() <= 256 && !p.contains(['\r', '\n', '\0']) => {
+                    if let Err(e) = crate::imap::store_password(&mut new, p) {
+                        err(&mut errors, "email.password", &e);
+                    }
+                }
+                _ => err(&mut errors, "email.password", "palavra-passe inválida"),
             }
         }
         if let Some(v) = email.get("address") {

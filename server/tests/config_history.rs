@@ -43,7 +43,7 @@ fn defaults_when_config_is_empty() {
     assert_eq!(p["summary"]["ai_provider"], "cli");
     assert_eq!(p["schedule"]["time"], "18:00");
     assert_eq!(p["destination"]["session_configured"], false);
-    assert_eq!(p["email"]["method"], "thunderbird");
+    assert_eq!(p["email"]["method"], "imap");
 }
 
 #[test]

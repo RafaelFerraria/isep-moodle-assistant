@@ -42,10 +42,19 @@ pub fn profiles_dir() -> PathBuf {
     if let Some(p) = std::env::var_os("ISEP_THUNDERBIRD_PROFILES") {
         return PathBuf::from(p);
     }
+    // com o Thunderbird da app instalado, a caixa é a do perfil da app
+    if crate::thunderbird::embedded_exe().is_some() {
+        return crate::thunderbird::profile_dir();
+    }
     PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("Thunderbird").join("Profiles")
 }
 
 pub fn find_thunderbird_inboxes() -> Vec<PathBuf> {
+    inboxes_in(&profiles_dir())
+}
+
+/// Caixas de entrada (ficheiros mbox) dentro de uma pasta de perfis.
+pub fn inboxes_in(root: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for entry in rd.flatten() {
@@ -61,7 +70,7 @@ pub fn find_thunderbird_inboxes() -> Vec<PathBuf> {
         }
     }
     let mut out = Vec::new();
-    walk(&profiles_dir(), &mut out, 0);
+    walk(root, &mut out, 0);
     out
 }
 
@@ -106,11 +115,16 @@ fn wait_for_inbox_to_settle(min_wait: Duration, quiet: Duration, max_wait: Durat
 /// Se o Thunderbird não estiver aberto, arranca-o em modo headless para descarregar os emails novos.
 pub fn sync_thunderbird_headless(timeout: Duration) -> bool {
     let Some(tb) = find_thunderbird_path() else { return false };
-    if is_thunderbird_running() {
+    // o Thunderbird da app tem o seu próprio perfil: não depende de haver outro (o do utilizador) aberto
+    let embedded = crate::thunderbird::embedded_exe().is_some();
+    if !embedded && is_thunderbird_running() {
         wait_for_inbox_to_settle(Duration::from_secs(3), Duration::from_secs(20), Duration::from_secs(180));
         return true;
     }
     let mut cmd = Command::new(tb);
+    if embedded {
+        cmd.arg("-profile").arg(crate::thunderbird::profile_dir()).arg("-no-remote");
+    }
     cmd.arg("--headless").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     hide_window(&mut cmd);
     let Ok(mut child) = cmd.spawn() else { return false };
@@ -279,5 +293,5 @@ pub fn source_for(method: &str) -> Result<Box<dyn MailSource>, String> {
 
 /// Escolhe o método de leitura configurado.
 pub fn get_emails(config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
-    source_for(str_or(config, "email_method", "thunderbird"))?.fetch(config, since, opts)
+    source_for(str_or(config, "email_method", "imap"))?.fetch(config, since, opts)
 }

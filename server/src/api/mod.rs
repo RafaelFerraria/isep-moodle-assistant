@@ -111,7 +111,10 @@ pub fn handle(app: &App, req: &Req) -> Resp {
         ["overview"] | ["emails"] | ["activity"] | ["session"] | ["setup"] | ["moodle", "files"] => Some((&["GET"], true)),
         ["session", "bot"] | ["session", "pair"] | ["session", "test"] | ["session", "recipients"] => Some((&["POST"], true)),
         ["session", "recipients", _] => Some((&["DELETE"], true)),
-        ["email", "connect", "start"] | ["email", "connect", "poll"] => Some((&["POST"], true)),
+        ["email", "connect", "start"] | ["email", "connect", "poll"] | ["email", "test"] => Some((&["POST"], true)),
+        ["email", "oauth", "start"] | ["email", "oauth", "finish"] => Some((&["POST"], true)),
+        ["thunderbird"] => Some((&["GET"], true)),
+        ["thunderbird", "install"] | ["thunderbird", "open"] | ["thunderbird", "account"] => Some((&["POST"], true)),
         ["jobs", _] | ["history", _] | ["logs", _] => Some((&["GET"], true)),
         _ => None,
     };
@@ -249,6 +252,77 @@ pub fn handle(app: &App, req: &Req) -> Resp {
             Some(Err(e)) => detail(404, &e),
             None => detail(422, "Índice inválido."),
         },
+        ("GET", ["thunderbird"]) => resp(200, crate::thunderbird::state()),
+        ("POST", ["thunderbird", "install"]) => {
+            match app.jobs.submit("thunderbird_install", move |progress| crate::thunderbird::install(&|l| progress(l))) {
+                Ok(job) => resp(202, job),
+                Err(b) => busy(b),
+            }
+        }
+        ("POST", ["thunderbird", "account"]) => {
+            let body = match body_json(req) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            match crate::thunderbird::connect_account(body["email"].as_str().unwrap_or("")) {
+                Ok(v) => {
+                    // guarda o endereço nas definições para o resto da app o mostrar
+                    let _ = service::update_settings(&json!({"email": {"address": body["email"].as_str().unwrap_or("").trim()}}));
+                    resp(200, v)
+                }
+                Err(e) => resp(422, json!({"detail": "Não foi possível ligar a conta.", "errors": {"email": e}})),
+            }
+        }
+        ("POST", ["thunderbird", "open"]) => match crate::thunderbird::open_for_account() {
+            Ok(()) => resp(200, json!({"ok": true})),
+            Err(e) => detail(400, &e),
+        },
+        ("POST", ["email", "oauth", "start"]) => {
+            let body = body_json(req).unwrap_or(Value::Null);
+            let email = body["email"].as_str().unwrap_or("").trim().to_string();
+            if !email.contains('@') {
+                return resp(422, json!({"detail": "Indica o teu email da escola.", "errors": {"email": "Escreve o teu email da escola completo (ex.: numero@isep.ipp.pt)."}}));
+            }
+            match oauth::start_auth_code(&config::load_config(), &email) {
+                Ok(v) => resp(200, v),
+                Err(e) => detail(502, &e),
+            }
+        }
+        ("POST", ["email", "oauth", "finish"]) => {
+            let body = match body_json(req) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            let email = body["email"].as_str().unwrap_or("").trim().to_string();
+            let url = body["redirect_url"].as_str().unwrap_or("");
+            let mut cfg = config::load_config();
+            match oauth::finish_auth_code(&cfg, url) {
+                Ok(token) => {
+                    let saved = oauth::store_refresh_token(&mut cfg, &token).and_then(|_| {
+                        cfg.insert("email_method".into(), json!("imap"));
+                        if email.contains('@') {
+                            cfg.insert("email_address".into(), json!(email));
+                        }
+                        config::save_config(&cfg).map_err(|e| e.to_string())
+                    });
+                    match saved {
+                        Ok(()) => resp(200, json!({"ok": true})),
+                        Err(e) => resp(200, json!({"ok": false, "error": e})),
+                    }
+                }
+                Err(e) => resp(200, json!({"ok": false, "error": e})),
+            }
+        }
+        ("POST", ["email", "test"]) => {
+            // lê os últimos dias com o que está guardado: diz se o email, a palavra-passe e o servidor estão certos
+            use crate::mail::{FetchOptions, MailSource};
+            let cfg = config::load_config();
+            let since = chrono::Local::now().naive_local() - chrono::Duration::days(3);
+            match (crate::imap::ImapSource).fetch(&cfg, since, FetchOptions { sync: false }) {
+                Ok(found) => resp(200, json!({"ok": true, "count": found.len()})),
+                Err(e) => resp(200, json!({"ok": false, "error": e})),
+            }
+        }
         ("POST", ["email", "connect", "start"]) => match oauth::start_device_login(&config::load_config()) {
             Ok(v) => resp(200, v),
             Err(e) => detail(502, &e),

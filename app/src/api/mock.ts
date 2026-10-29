@@ -1,7 +1,7 @@
 // Servidor simulado em memória: serve a app em modo demonstração (sem backend) e os testes.
 // Reproduz as regras do contrato real: validação com erros por campo, segredos só de escrita, uma tarefa de cada vez.
 import type { Transport, TransportResponse } from './transport'
-import type { Activity, DevicePoll, EmailItem, EmailsResult, HistoryRecord, Institution, Job, MoodleFiles, NewFile, Overview, SessionState, SetupState, Settings, SettingsPatch, Status, SummaryRules } from './types'
+import type { Activity, ThunderbirdState, DevicePoll, EmailItem, EmailsResult, HistoryRecord, Institution, Job, MoodleFiles, NewFile, Overview, SessionState, SetupState, Settings, SettingsPatch, Status, SummaryRules } from './types'
 
 export interface MockOptions {
   /** Duração simulada das tarefas (ms). 0 = terminam no pedido seguinte ao arranque. */
@@ -34,9 +34,15 @@ export class MockTransport implements Transport {
   session: SessionState = { node_ok: true, script_ok: true, bot_created: true, bot_id: '05bb11…c0de22', recipients: ['05a79f…d22077'], configured: true }
   emails: EmailItem[] = []
   emailError: string | null = null
+  /** O que o «Testar a ligação» responde; os testes mudam-no para simular erros. */
+  emailTest: { ok: boolean; count?: number; error?: string } = { ok: true, count: 2 }
   moodleProgress: MoodleFiles
   /** Os testes põem `true` para simular que o utilizador autorizou a conta Microsoft. */
   deviceApproved = false
+  /** Última palavra-passe de email recebida (só para os testes verem que chegou ao servidor). */
+  lastEmailPassword = ''
+  /** Por omissão há só o Thunderbird do utilizador (do sistema); os testes mudam-no. */
+  thunderbird: ThunderbirdState = { embedded: false, version: null, profile_ready: false, system_found: true, source: 'system' }
   logs: Activity['logs'] = { notifier: ['[2026-10-26 18:00:01] === INÍCIO DA EXECUÇÃO DO NOTIFICADOR ISEP ==='], sync: ['[2026-10-26 18:00:05] A autenticar no Moodle do ISEP...'] }
   /** Último token recebido (só para os testes verificarem que chegou ao servidor). */
   lastApiKey = ''
@@ -65,7 +71,7 @@ export class MockTransport implements Transport {
       },
       schedule: { time: '18:00' },
       destination: { session_recipients: ['05a79f…d22077'], session_configured: true },
-      email: { method: 'thunderbird', address: '1234567@isep.ipp.pt', connected: false },
+      email: { method: 'imap', address: '1234567@isep.ipp.pt', connected: true, password_set: true, oauth_connected: false, imap_host: 'outlook.office365.com', imap_port: 993 },
       setup: { done: true },
       student: { institution_id: 'isep', institution_name: 'ISEP – Instituto Superior de Engenharia do Porto (P.PORTO)', course: 'Engenharia Informática', year: 3, configured: true },
       moodle: {
@@ -152,6 +158,18 @@ export class MockTransport implements Transport {
     if (route === 'GET /moodle/files') return ok({ ...this.moodleProgress, downloaded: this.newFiles, moodle: { ...this.moodleProgress.moodle, configured: this.moodle.configured, username: this.moodle.username } })
     if (route === 'GET /activity') return ok(this.activity(Number(q.get('days') ?? 7)))
     if (route === 'GET /setup') return ok(this.setupState())
+    if (route === 'GET /thunderbird') return ok(this.thunderbird)
+    if (route === 'POST /thunderbird/install') return this.startJob('thunderbird_install', false)
+    if (route === 'POST /thunderbird/account') {
+      const email = String((body as { email?: string } | undefined)?.email ?? '').trim()
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(422, 'Não foi possível ligar a conta.', { errors: { email: 'Escreve o teu email da escola completo (ex.: numero@isep.ipp.pt).' } })
+      if (!this.thunderbird.embedded) return fail(422, 'Não foi possível ligar a conta.', { errors: { email: 'O Thunderbird da app ainda não está instalado.' } })
+      this.settings = { ...this.settings, email: { ...this.settings.email, address: email } }
+      return ok({ ok: true, preconfigured: true })
+    }
+    if (route === 'POST /thunderbird/open') {
+      return this.thunderbird.embedded ? ok({ ok: true }) : fail(400, 'O Thunderbird da app ainda não está instalado.')
+    }
     if (route === 'GET /institutions') return ok({ items: INSTITUTIONS })
     if (route === 'POST /moodle/probe') return this.probe((body as { url: string }).url)
     if (route === 'POST /session/account') return this.createAccount()
@@ -162,6 +180,23 @@ export class MockTransport implements Transport {
     if (route === 'POST /session/recipients') return this.addRecipient((body as { session_id: string }).session_id)
     const rm = /^DELETE \/session\/recipients\/(.+)$/.exec(route)
     if (rm) return this.removeRecipient(Number(rm[1]))
+    if (route === 'POST /email/oauth/start') {
+      const email = String((body as { email?: string } | undefined)?.email ?? '')
+      if (!email.includes('@')) return fail(422, 'Indica o teu email da escola.', { errors: { email: 'Escreve o teu email da escola completo (ex.: numero@isep.ipp.pt).' } })
+      return ok({ auth_url: `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?client_id=9e5f94bc&login_hint=${encodeURIComponent(email)}`, redirect_uri: 'https://localhost' })
+    }
+    if (route === 'POST /email/oauth/finish') {
+      const b = body as { email?: string; redirect_url?: string }
+      if (!b.redirect_url?.startsWith('https://localhost')) return ok({ ok: false, error: 'O endereço não é o do regresso da Microsoft (deve começar por https://localhost).' })
+      if (b.redirect_url.includes('error=')) return ok({ ok: false, error: 'Cancelaste o início de sessão.' })
+      if (!b.redirect_url.includes('code=')) return ok({ ok: false, error: 'A Microsoft não devolveu o código de autorização.' })
+      const email = { ...this.settings.email, method: 'imap' as const, oauth_connected: true, connected: true, address: b.email || this.settings.email.address }
+      this.settings = { ...this.settings, email }
+      return ok({ ok: true })
+    }
+    if (route === 'POST /email/test') {
+      return ok(this.settings.email.password_set || this.settings.email.oauth_connected ? this.emailTest : { ok: false, error: 'Entra com a conta da escola ou indica a palavra-passe do email nas Definições.' })
+    }
     if (route === 'POST /email/connect/start') {
       return ok({ device_code: 'dc-mock', user_code: 'ABCD-1234', verification_uri: 'https://microsoft.com/devicelogin', interval: 1, expires_in: 900 })
     }
@@ -292,7 +327,8 @@ export class MockTransport implements Transport {
 
   private setupState(): SetupState {
     const s = this.settings
-    const emailOk = s.email.method === 'imap' ? s.email.connected && s.email.address.includes('@') : true
+    const tb = this.thunderbird
+    const emailOk = s.email.method === 'imap' ? s.email.connected : tb.embedded ? tb.profile_ready : tb.system_found
     const steps: Status['checks'] = [
       { id: 'profile', label: 'Perfil', ok: s.student.configured, detail: '', required: true },
       { id: 'email', label: 'Emails', ok: emailOk, detail: '', required: true },
@@ -409,6 +445,21 @@ export class MockTransport implements Transport {
       if (patch.email.address === '' || patch.email.address.includes('@')) next.email.address = patch.email.address
       else errors['email.address'] = 'endereço de email inválido'
     }
+    if (patch.email?.imap_host !== undefined) {
+      if (/^[A-Za-z0-9.-]+\.[A-Za-z0-9.-]+$/.test(patch.email.imap_host)) next.email.imap_host = patch.email.imap_host.toLowerCase()
+      else errors['email.imap_host'] = 'endereço do servidor inválido (ex.: outlook.office365.com)'
+    }
+    if (patch.email?.imap_port !== undefined) {
+      if (Number.isInteger(patch.email.imap_port) && patch.email.imap_port >= 1 && patch.email.imap_port <= 65535) next.email.imap_port = patch.email.imap_port
+      else errors['email.imap_port'] = 'porta entre 1 e 65535'
+    }
+    if (patch.email?.sign_out) next.email.oauth_connected = false
+    if (patch.email?.clear_password) next.email.password_set = false
+    if (patch.email?.password) {
+      this.lastEmailPassword = patch.email.password
+      next.email.password_set = true
+    }
+    next.email.connected = next.email.method === 'imap' && (next.email.password_set || next.email.oauth_connected) && next.email.address.includes('@')
     if (patch.setup?.done !== undefined) next.setup.done = patch.setup.done
     if (patch.student) {
       const st = patch.student
@@ -491,7 +542,9 @@ export class MockTransport implements Transport {
     this.jobs.set(job.id, job)
     this.order.push(job.id)
     const lines =
-      kind === 'session_pair'
+      kind === 'thunderbird_install'
+        ? ['A procurar a versão mais recente do Thunderbird…', 'Versão 159.0 encontrada.', 'A verificar a integridade…', 'Thunderbird instalado.']
+        : kind === 'session_pair'
         ? ['À espera da tua mensagem para o bot.', 'Mensagem recebida: destinatário guardado.']
         : kind === 'session_test'
           ? ['A enviar resumo para o Session (Destino: 05a79f...)...', 'Mensagem Session enviada com sucesso para 05a79f...!']
@@ -503,7 +556,10 @@ export class MockTransport implements Transport {
       job.progress_total = lines.length
       job.status = 'done'
       job.finished = iso(this.opts.now())
-      if (kind === 'session_pair') {
+      if (kind === 'thunderbird_install') {
+        this.thunderbird = { embedded: true, bundled: false, version: '159.0', profile_ready: false, system_found: this.thunderbird.system_found, source: 'embedded' }
+        job.result = this.thunderbird
+      } else if (kind === 'session_pair') {
         this.addRecipient(`05${'ab'.repeat(32)}`)
         job.result = { session_id: '05abab…abab' }
       } else if (kind === 'session_test') {

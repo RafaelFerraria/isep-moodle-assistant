@@ -3,6 +3,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell, session } = require('electro
 const fs = require('node:fs')
 const path = require('node:path')
 const { httpRequest, startBackend } = require('./backend.cjs')
+const oauth = require('./oauth.cjs')
 
 // Pasta de dados com nome legível (por omissão seria o nome técnico do pacote). As tarefas agendadas guardam este caminho.
 app.setPath('userData', path.join(app.getPath('appData'), 'ISEP Assistant'))
@@ -80,6 +81,61 @@ ipcMain.handle('isep:pickFolder', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   const r = await dialog.showOpenDialog(win, { title: 'Escolhe a pasta dos downloads', properties: ['openDirectory', 'createDirectory'] })
   return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+})
+
+/**
+ * Início de sessão da Microsoft numa janela da app (o mesmo que o Thunderbird faz): a janela abre a página de entrada, a app
+ * apanha o regresso a https://localhost (que nunca chega a ser pedido à rede) e devolve esse endereço à página, que o entrega
+ * ao servidor local. A janela usa uma sessão só em memória: nada do início de sessão fica guardado no navegador da app.
+ * O endereço de regresso leva o código de autorização: nunca é escrito em registos.
+ */
+ipcMain.handle('isep:oauth', (event, authUrl, redirectUri) => {
+  if (!oauth.isAllowedAuthUrl(authUrl) || redirectUri !== oauth.REDIRECT) return null
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  return new Promise((resolve) => {
+    const ses = session.fromPartition(`oauth-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const win = new BrowserWindow({
+      width: 520,
+      height: 720,
+      parent: parent || undefined,
+      modal: !!parent,
+      title: 'Entrar na conta da escola',
+      autoHideMenuBar: true,
+      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    })
+    let finished = false
+    let timer = null
+    const finish = (url) => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      resolve(url)
+      if (!win.isDestroyed()) win.close()
+    }
+    ses.webRequest.onBeforeRequest({ urls: oauth.REQUEST_PATTERNS }, (details, callback) => {
+      callback({ cancel: true })
+      finish(details.url)
+    })
+    win.webContents.on('will-redirect', (e, url) => {
+      if (oauth.isRedirect(url)) {
+        e.preventDefault()
+        finish(url)
+      }
+    })
+    win.webContents.on('will-navigate', (e, url) => {
+      if (oauth.isRedirect(url)) {
+        e.preventDefault()
+        finish(url)
+      } else if (!oauth.isAllowedNavigation(url)) e.preventDefault()
+    })
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (oauth.isAllowedNavigation(url)) void win.loadURL(url)
+      return { action: 'deny' }
+    })
+    win.on('closed', () => finish(null))
+    timer = setTimeout(() => finish(null), 10 * 60 * 1000)
+    void win.loadURL(authUrl)
+  })
 })
 
 ipcMain.handle('isep:backend', async () => {

@@ -110,7 +110,7 @@ fn emails_page_reports_a_source_that_is_not_ready_instead_of_failing() {
     save_config(&json_map(json!({"email_method": "imap", "email_address": "a@escola.pt"}))).unwrap();
     let r = call("GET", "/emails", None);
     assert_eq!(r.status, 200);
-    assert!(r.body["error"].as_str().unwrap().contains("ainda não foi ligada"), "{}", r.body);
+    assert!(r.body["error"].as_str().unwrap().contains("palavra-passe"), "{}", r.body);
     save_config(&json_map(json!({"email_method": "pop3"}))).unwrap();
     assert!(call("GET", "/emails", None).body["error"].as_str().unwrap().contains("pop3"));
 }
@@ -132,7 +132,7 @@ fn microsoft_account_connects_with_a_device_code_and_the_token_is_stored_encrypt
         }
     });
     std::env::set_var("ISEP_MS_LOGIN_URL", &login.base);
-    save_config(&json_map(json!({"email_method": "thunderbird"}))).unwrap();
+    save_config(&json_map(json!({"email_method": "thunderbird", "email_address": "aluno@escola.pt"}))).unwrap();
 
     let start = call("POST", "/email/connect/start", None);
     assert_eq!(start.status, 200, "{}", start.body);

@@ -80,11 +80,11 @@ pub fn get_status(active_job: Value) -> Value {
     let checks = vec![
         check("config", "Configuração criada", !config.is_empty(), if config.is_empty() { "Abre o assistente de configuração." } else { "" }, true),
         check("session", "Destino Session configurado", settings["destination"]["session_configured"].as_bool().unwrap_or(false), "", true),
-        check("email", "Email da escola ligado", crate::oauth::is_connected(&config), "Liga a conta de email nas Definições.",
-            matches!(str_or(&config, "email_method", "thunderbird"), "imap" | "graph" | "outlook")),
+        check("email", "Email da escola ligado", crate::imap::is_configured(&config), "Liga a conta de email nas Definições.",
+            matches!(str_or(&config, "email_method", "imap"), "imap" | "graph" | "outlook")),
         check("thunderbird", "Thunderbird instalado", thunderbird.is_some(),
             if thunderbird.is_some() { "" } else { "Necessário para ler os emails do ISEP." },
-            str_or(&config, "email_method", "thunderbird") == "thunderbird"),
+            str_or(&config, "email_method", "imap") == "thunderbird"),
         check("node", "Motor do Session (Node.js)", system::node_path().is_some(), "Necessário para enviar para o Session; vem dentro da app.", true),
         check("moodle", "Credenciais do Moodle", mood["configured"].as_bool().unwrap_or(false),
             if mood["configured"].as_bool().unwrap_or(false) { "" } else { "Define o utilizador e a palavra-passe do Moodle." }, false),
@@ -130,13 +130,20 @@ pub fn get_setup(active_job: Value) -> Value {
     let settings = config::public_settings(&config);
     let tasks = system::query_tasks();
     let mood = moodle_state(&config);
-    let method = str_or(&config, "email_method", "thunderbird").to_string();
+    let method = str_or(&config, "email_method", "imap").to_string();
     let (email_ok, email_detail) = match method.as_str() {
         "imap" | "graph" | "outlook" => (
-            crate::oauth::is_connected(&config) && str_of(&config, "email_address").contains('@'),
+            crate::imap::is_configured(&config),
             "Email da escola ligado.".to_string(),
         ),
-        _ => (system::find_thunderbird_path().is_some(), "Thunderbird instalado com a conta do ISEP.".to_string()),
+        _ => {
+            let tb = crate::thunderbird::state();
+            if tb["embedded"].as_bool().unwrap_or(false) {
+                (tb["profile_ready"].as_bool().unwrap_or(false), "Adiciona a tua conta da escola no Thunderbird da app.".to_string())
+            } else {
+                (system::find_thunderbird_path().is_some(), "Thunderbird instalado com a conta do ISEP.".to_string())
+            }
+        }
     };
     let session = crate::session::state(&config);
     let session_ok = session["configured"].as_bool().unwrap_or(false) && session["node_ok"].as_bool().unwrap_or(false);

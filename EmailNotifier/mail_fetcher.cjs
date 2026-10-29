@@ -1,6 +1,7 @@
 'use strict'
-// Lê a caixa de entrada por IMAP com OAuth2 (XOAUTH2). Corre dentro da app (Electron como Node): não há nada a instalar.
-// Uso: node mail_fetcher.cjs --host H --port P --user EMAIL --since YYYY-MM-DD [--max N]   (o token de acesso vem por stdin)
+// Lê a caixa de entrada por IMAP. Corre dentro da app (Electron como Node): não há nada a instalar.
+// Uso: node mail_fetcher.cjs --host H --port P --user EMAIL --since YYYY-MM-DD [--max N] [--auth password|xoauth2]
+// O segredo vem por stdin: a palavra-passe (--auth password, o predefinido) ou o token de acesso (--auth xoauth2).
 // Saída: uma linha JSON {"messages":[{"uid":N,"raw":"<hex>"}]} ou {"error":"..."}.
 // ISEP_IMAP_PLAIN=1 usa TCP sem TLS (só para os testes com um servidor IMAP falso).
 const net = require('node:net')
@@ -102,8 +103,11 @@ async function main() {
   const max = Math.min(Math.max(Number(arg('max', '300')) || 300, 1), 1000)
   if (!host || !user) return fail('faltam --host e --user')
   const since = imapDate(arg('since'))
-  const token = await readStdin()
-  if (!token) return fail('falta o token de acesso (stdin)')
+  const mode = arg('auth', 'password')
+  if (mode !== 'password' && mode !== 'xoauth2') return fail('--auth deve ser password ou xoauth2')
+  const secret = await readStdin()
+  if (!secret) return fail(mode === 'password' ? 'falta a palavra-passe (stdin)' : 'falta o token de acesso (stdin)')
+  if (/[\r\n\0]/.test(user) || /[\r\n\0]/.test(secret)) return fail('o email e a palavra-passe não podem ter quebras de linha')
 
   const plain = process.env.ISEP_IMAP_PLAIN === '1'
   const sock = await new Promise((resolve, reject) => {
@@ -136,9 +140,26 @@ async function main() {
   const greeting = await reader.next()
   if (!/^\* (OK|PREAUTH)/i.test(greeting.text)) return fail(`resposta inesperada do servidor: ${greeting.text.slice(0, 80)}`)
 
-  const xoauth = Buffer.from(`user=${user}\x01auth=Bearer ${token}\x01\x01`).toString('base64')
-  const auth = await run(`AUTHENTICATE XOAUTH2 ${xoauth}`)
-  if (auth.status !== 'OK') return fail('o servidor recusou o início de sessão (a autorização pode ter expirado)')
+  const quote = (s) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  const auth =
+    mode === 'password'
+      ? await run(`LOGIN ${quote(user)} ${quote(secret)}`)
+      : await run(`AUTHENTICATE XOAUTH2 ${Buffer.from(`user=${user}\x01auth=Bearer ${secret}\x01\x01`).toString('base64')}`)
+  if (auth.status !== 'OK') {
+    // a palavra-passe nunca entra na mensagem: só o que o servidor diz a seguir ao estado
+    const said = auth.text.replace(/^A\d+ (NO|BAD)\s*/i, '').slice(0, 120)
+    if (mode === 'password' && /basic authentication is disabled/i.test(said)) {
+      return fail(
+        'o servidor desligou o início de sessão por email e palavra-passe (Basic authentication is disabled). ' +
+          'Isto é decidido pela escola/Microsoft; só uma palavra-passe de aplicação, se a escola a permitir, ou outra forma de entrar o resolve',
+      )
+    }
+    return fail(
+      mode === 'password'
+        ? `o servidor recusou o email ou a palavra-passe${said ? ` (${said})` : ''}`
+        : 'o servidor recusou o início de sessão (a autorização pode ter expirado)',
+    )
+  }
 
   const sel = await run('SELECT INBOX')
   if (sel.status !== 'OK') return fail('não foi possível abrir a caixa de entrada')

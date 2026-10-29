@@ -10,7 +10,7 @@ use isep_assistant::digest::{run_digest, Deps};
 use isep_assistant::{config, moodle_sync, service, VERSION};
 
 fn usage() -> i32 {
-    eprintln!("Uso: isep-assistant-api <serve [--port N] | digest [--preview] | sync | version>");
+    eprintln!("Uso: isep-assistant-api <serve [--port N] | digest [--preview] | sync | fetch-thunderbird --to <pasta> | version>");
     2
 }
 
@@ -64,6 +64,31 @@ fn take_root(args: Vec<String>) -> Vec<String> {
     out
 }
 
+/// `fetch-thunderbird --to <pasta>`: descarrega, confere e instala o Thunderbird oficial nessa pasta. Usado ao gerar a app,
+/// para o Thunderbird já ir dentro dela (o utilizador final não descarrega nada).
+fn fetch_thunderbird(args: &[String]) -> i32 {
+    let mut it = args.iter();
+    let mut to: Option<String> = None;
+    while let Some(a) = it.next() {
+        match (a.as_str(), it.next()) {
+            ("--to", Some(dir)) => to = Some(dir.clone()),
+            _ => return usage(),
+        }
+    }
+    let Some(dir) = to else { return usage() };
+    std::env::set_var("ISEP_TB_DIR", &dir);
+    match isep_assistant::thunderbird::install(&|l| println!("{l}")) {
+        Ok(state) => {
+            println!("Thunderbird {} instalado em {dir}", state["version"].as_str().unwrap_or("?"));
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
 fn main() {
     let args = take_root(std::env::args().skip(1).collect());
     let code = match args.first().map(String::as_str) {
@@ -84,6 +109,7 @@ fn main() {
             let res = moodle_sync::run_sync("manual", dir.as_deref(), Some(&base), None);
             i32::from(!res.ok && !res.busy)
         }
+        Some("fetch-thunderbird") => fetch_thunderbird(&args[1..]),
         Some("version") | Some("--version") => {
             println!("isep-assistant {VERSION}");
             0

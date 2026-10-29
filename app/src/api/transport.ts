@@ -45,6 +45,8 @@ export class HttpTransport implements Transport {
 export interface IsepBridge {
   request(method: string, path: string, body?: unknown): Promise<TransportResponse>
   backend?(): Promise<{ ready: boolean; error?: string | null; version?: string }>
+  /** Abre o início de sessão da Microsoft numa janela da app. Devolve o endereço de regresso (ou null se for cancelado). */
+  oauthLogin?(authUrl: string, redirectUri: string): Promise<string | null>
   /** Abre o seletor de pastas do sistema. Devolve `null` se o utilizador cancelar. */
   pickFolder?(): Promise<string | null>
 }

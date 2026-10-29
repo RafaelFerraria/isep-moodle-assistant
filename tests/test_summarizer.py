@@ -81,8 +81,8 @@ def test_forum_announcements_are_deduplicated_across_courses():
 
 
 def test_student_forum_posts_are_labelled_as_colleagues():
-    out = s.build_summary([forum_mail("ARQCP", "Dúvida", "DIAS 1251344", "Como funciona?")], now=NOW)
-    assert "DIAS 1251344 (colega)" in out
+    out = s.build_summary([forum_mail("ARQCP", "Dúvida", "SILVA 1234567", "Como funciona?")], now=NOW)
+    assert "SILVA 1234567 (colega)" in out
 
 
 def test_faltas_counts_per_course():

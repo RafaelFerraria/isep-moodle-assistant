@@ -170,7 +170,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
 
       {step === 1 && (
         <div className="space-y-4">
-          <Card title="O teu email" subtitle="A app lê os emails da tua escola diretamente, sem precisares de mais nenhum programa. Só lê; nunca apaga nem envia.">
+          <Card title="O teu email" subtitle="A app lê os emails da escola diretamente, sem precisares de mais nenhum programa. Só lê; nunca apaga nem envia.">
             <EmailSetup email={s.email} onChanged={reload} />
           </Card>
           <div className="flex justify-between">

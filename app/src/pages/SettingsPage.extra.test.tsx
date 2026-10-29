@@ -36,24 +36,39 @@ describe('SettingsPage: perfil, email, regras, Moodle, notificações e verifica
     expect(mock.settings.student.year).toBe(4)
   })
 
-  it('liga o email dentro da app a partir das Definições', async () => {
-    const user = userEvent.setup()
-    const mock = new MockTransport()
-    mock.settings.email = { method: 'imap', address: '', connected: false }
-    renderWithApi(<SettingsPage />, { mock })
-    await user.type(await screen.findByLabelText('O teu email da escola'), 'aluno@escola.pt')
-    await user.click(screen.getByRole('button', { name: 'Ligar o meu email' }))
-    expect(await screen.findByLabelText('Código de autorização')).toHaveTextContent('ABCD-1234')
-    mock.deviceApproved = true
+  it('mostra o email já ligado, com a palavra-passe guardada e sem a mostrar', async () => {
+    await loaded()
     expect(await screen.findByText(/Email ligado/)).toBeInTheDocument()
-    expect(mock.settings.email.address).toBe('aluno@escola.pt')
+    expect(screen.getByLabelText('O teu email da escola')).toHaveValue('1234567@isep.ipp.pt')
+    expect(screen.getByLabelText('Servidor IMAP')).toHaveValue('outlook.office365.com')
+    expect(screen.getByLabelText('Palavra-passe do email')).toHaveValue('')
+    expect(screen.getByText(/Já está guardada \(cifrada\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/Estás a ler os emails pelo Thunderbird/)).not.toBeInTheDocument()
   })
 
-  it('quem ainda lê pelo Thunderbird vê o aviso e pode passar a usar só a app', async () => {
-    const { user } = await loaded()
-    expect(await screen.findByText(/Estás a ler os emails pelo Thunderbird/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Passar a usar só a app' }))
-    expect(await screen.findByRole('button', { name: 'Ligar o meu email' })).toBeInTheDocument()
+  it('muda a palavra-passe e testa a ligação sem pedir tudo de novo', async () => {
+    const { user, mock } = await loaded()
+    await user.type(await screen.findByLabelText('Palavra-passe do email'), 'nova-palavra-passe')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText(/Ligado\. Encontrei 2 email\(s\)/)).toBeInTheDocument()
+    expect(mock.lastEmailPassword).toBe('nova-palavra-passe')
+    expect(document.body.textContent).not.toContain('nova-palavra-passe')
+  })
+
+  it('apaga a palavra-passe guardada', async () => {
+    const { user, mock } = await loaded()
+    await user.click(await screen.findByRole('button', { name: 'Apagar a palavra-passe guardada' }))
+    await waitFor(() => expect(mock.settings.email.password_set).toBe(false))
+    expect(await screen.findByText(/Fica guardada cifrada neste PC/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar e testar a ligação' })).toBeDisabled()
+  })
+
+  it('quem ainda lê pelo Thunderbird (instalação antiga) é convidado a passar para o email da app', async () => {
+    const mock = new MockTransport()
+    mock.settings.email = { method: 'thunderbird', address: '1234567@isep.ipp.pt', connected: false, password_set: false, oauth_connected: false, imap_host: '', imap_port: 993 }
+    await loaded(mock)
+    expect(await screen.findByText(/Estás a ler os emails pelo Thunderbird \(configuração antiga\)/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar e testar a ligação' })).toBeDisabled()
   })
 
   it('edita as regras do resumo, valida o que foi escrito e só guarda quando está certo', async () => {

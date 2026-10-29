@@ -7,7 +7,7 @@ import { fmtDateTime } from '../lib/format'
 import { useApp } from '../lib/context'
 import { useAsync } from '../lib/hooks'
 
-const SOURCE_LABEL: Record<string, string> = { thunderbird: 'Thunderbird (configuração anterior)', imap: 'o teu email da escola, lido pela app' }
+const SOURCE_LABEL: Record<string, string> = { thunderbird: 'Thunderbird', imap: 'o teu email da escola, lido pela app' }
 
 export function EmailsPage() {
   const { api } = useApp()

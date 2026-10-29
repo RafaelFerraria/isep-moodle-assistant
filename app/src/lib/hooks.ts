@@ -48,7 +48,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], intervalMs = 
   return { data, error, loading, reload }
 }
 
-export type JobKind = 'digest_preview' | 'digest' | 'moodle_sync' | 'session_pair' | 'session_test'
+export type JobKind = 'digest_preview' | 'digest' | 'moodle_sync' | 'session_pair' | 'session_test' | 'thunderbird_install'
 
 export interface JobRunner {
   job: Job | null
@@ -107,6 +107,7 @@ export function useJobRunner(onFinished?: (job: Job) => void): JobRunner {
           moodle_sync: () => api.startMoodleSync(),
           session_pair: () => api.startSessionPair(),
           session_test: () => api.startSessionTest(),
+          thunderbird_install: () => api.startThunderbirdInstall(),
         }
         const started = await starters[kind]()
         if (!alive.current) return

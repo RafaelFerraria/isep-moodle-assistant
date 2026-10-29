@@ -11,7 +11,8 @@
     "build:ui": "npm --prefix ../app run build",
     "build:server": "cargo build --release --manifest-path ../server/Cargo.toml",
     "pack": "npm run build:ui && npm run build:server && electron-builder --dir",
-    "dist": "npm run build:ui && npm run build:server && electron-builder"
+    "dist": "npm run build:ui && npm run build:server && electron-builder",
+    "fetch:thunderbird": "node scripts/fetch-thunderbird.cjs"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

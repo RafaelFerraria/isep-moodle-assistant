@@ -37,3 +37,5 @@ desktop/node_modules/
 desktop/dist/
 desktop/out/
 *.tsbuildinfo
+desktop/vendor/
+desktop/dist-build*/

@@ -57,6 +57,16 @@ fn fake_imap(messages: Vec<(u32, String)>) -> (u16, Arc<Mutex<Vec<String>>>) {
             let (tag, cmd) = line.split_once(' ').unwrap_or((&line, ""));
             if cmd.starts_with("AUTHENTICATE XOAUTH2") {
                 out.write_all(format!("{tag} OK autenticado\r\n").as_bytes()).unwrap();
+            } else if cmd.starts_with("LOGIN") {
+                if cmd.contains("\"bloqueada\"") {
+                    out.write_all(format!("{tag} NO Basic authentication is disabled.\r\n").as_bytes()).unwrap();
+                    break;
+                }
+                if cmd.contains("\"errada\"") {
+                    out.write_all(format!("{tag} NO LOGIN failed.\r\n").as_bytes()).unwrap();
+                    break;
+                }
+                out.write_all(format!("{tag} OK autenticado\r\n").as_bytes()).unwrap();
             } else if cmd.starts_with("SELECT") {
                 out.write_all(format!("* {} EXISTS\r\n{tag} OK [READ-WRITE] aberta\r\n", messages.len()).as_bytes()).unwrap();
             } else if cmd.starts_with("UID SEARCH") {
@@ -381,4 +391,150 @@ fn creating_a_session_account_returns_the_recovery_phrase_once_and_stores_only_t
     assert!(!saved.contains(phrase), "a frase de recuperação do utilizador nunca fica guardada");
     assert!(saved.contains(id), "o ID fica como destinatário");
     assert!(!call("GET", "/session", None).body.to_string().contains(phrase));
+}
+
+// ---------------------------------------------------------------- email + palavra-passe (sem login, sem Thunderbird)
+
+fn imap_env(port: u16, node: &std::path::Path) {
+    std::env::set_var("ISEP_IMAP_HOST", "127.0.0.1");
+    std::env::set_var("ISEP_IMAP_PORT", port.to_string());
+    std::env::set_var("ISEP_IMAP_PLAIN", "1");
+    std::env::set_var("ISEP_NODE", node);
+    std::env::set_var("ISEP_MAIL_SCRIPT", repo_script("mail_fetcher.cjs"));
+}
+
+fn imap_env_clear() {
+    for v in ["ISEP_IMAP_HOST", "ISEP_IMAP_PORT", "ISEP_IMAP_PLAIN", "ISEP_NODE", "ISEP_MAIL_SCRIPT"] {
+        std::env::remove_var(v);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn email_and_password_are_enough_and_the_password_is_stored_encrypted_and_never_returned() {
+    let Some(node) = node() else { return };
+    let _home = Home::new();
+    let (port, seen) = fake_imap(vec![(101, raw_mail("Prazo do PI", "p1@escola", "Entrega até sexta.")), (102, raw_mail("Aviso", "p2@escola", "Aula cancelada."))]);
+    imap_env(port, &node);
+
+    // guardar: email, servidor e palavra-passe, tudo pela API das definições
+    let put = call("PUT", "/settings", Some(json!({"email": {"method": "imap", "address": "aluno@escola.pt", "imap_host": "IMAP.Escola.pt", "imap_port": 993, "password": "segredo"}})));
+    assert_eq!(put.status, 200, "{}", put.body);
+    let email = &put.body["settings"]["email"];
+    assert_eq!(email["method"], "imap");
+    assert_eq!(email["password_set"], true);
+    assert_eq!(email["connected"], true);
+    assert_eq!(email["imap_host"], "imap.escola.pt", "o servidor guarda-se em minúsculas");
+    assert!(!put.body.to_string().contains("segredo"), "a palavra-passe nunca volta ao ecrã");
+    assert!(!call("GET", "/settings", None).body.to_string().contains("segredo"));
+
+    let cfg = load_config();
+    assert!(cfg.get("email_password").is_none());
+    let stored = cfg["email_password_enc"].as_str().unwrap();
+    assert!(!stored.contains("segredo") && stored.chars().all(|c| c.is_ascii_hexdigit()), "cifrada com o DPAPI");
+    assert_eq!(isep_assistant::dpapi::decrypt(stored).unwrap(), "segredo");
+
+    // ler os emails (o servidor falso só aceita uma ligação, por isso o «testar» tem testes próprios)
+    let list = call("GET", "/emails?days=3", None);
+    imap_env_clear();
+    assert_eq!(list.body["source"], "imap");
+    assert_eq!(list.body["total"], 2);
+    let login = seen.lock().unwrap().iter().find(|l| l.contains("LOGIN")).cloned().unwrap();
+    assert!(login.ends_with("LOGIN \"aluno@escola.pt\" \"segredo\""), "{login}");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_wrong_password_gives_a_readable_error_that_never_repeats_the_password() {
+    let Some(node) = node() else { return };
+    let _home = Home::new();
+    let (port, _seen) = fake_imap(vec![]);
+    imap_env(port, &node);
+    call("PUT", "/settings", Some(json!({"email": {"method": "imap", "address": "aluno@escola.pt", "password": "errada"}})));
+    let test = call("POST", "/email/test", None);
+    imap_env_clear();
+    assert_eq!(test.body["ok"], false);
+    let msg = test.body["error"].as_str().unwrap();
+    assert!(msg.contains("recusou o email ou a palavra-passe") && msg.contains("LOGIN failed"), "{msg}");
+    assert!(!msg.contains("errada"), "{msg}");
+}
+
+#[cfg(windows)]
+#[test]
+fn passwords_with_quotes_and_backslashes_are_escaped_and_cannot_inject_commands() {
+    let Some(node) = node() else { return };
+    let _home = Home::new();
+    let (port, seen) = fake_imap(vec![]);
+    imap_env(port, &node);
+    call("PUT", "/settings", Some(json!({"email": {"method": "imap", "address": "aluno@escola.pt", "password": "a\"b\\c"}})));
+    let test = call("POST", "/email/test", None);
+    imap_env_clear();
+    assert_eq!(test.body["ok"], true, "{}", test.body);
+    assert_eq!(test.body["count"], 0);
+    let login = seen.lock().unwrap().iter().find(|l| l.contains("LOGIN")).cloned().unwrap();
+    assert!(login.ends_with(r#"LOGIN "aluno@escola.pt" "a\"b\\c""#), "{login}");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_plain_text_password_from_the_python_version_still_works() {
+    let Some(node) = node() else { return };
+    let _home = Home::new();
+    let (port, seen) = fake_imap(vec![(1, raw_mail("Olá", "l1@escola", "texto"))]);
+    imap_env(port, &node);
+    save_config(&json_map(json!({"email_method": "imap", "email_address": "aluno@escola.pt", "email_password": "antiga"}))).unwrap();
+    assert_eq!(call("GET", "/settings", None).body["email"]["password_set"], true);
+    let list = call("GET", "/emails?days=3", None);
+    imap_env_clear();
+    assert_eq!(list.body["total"], 1, "{}", list.body);
+    assert!(seen.lock().unwrap().iter().any(|l| l.ends_with(r#"LOGIN "aluno@escola.pt" "antiga""#)));
+    assert!(!list.body.to_string().contains("antiga"));
+}
+
+#[test]
+fn email_settings_are_validated_and_the_password_can_be_removed() {
+    let _home = Home::new();
+    for (patch, field) in [
+        (json!({"imap_host": "sem espaços"}), "email.imap_host"),
+        (json!({"imap_host": "semponto"}), "email.imap_host"),
+        (json!({"imap_host": "a.b; rm -rf"}), "email.imap_host"),
+        (json!({"imap_port": 0}), "email.imap_port"),
+        (json!({"imap_port": 70000}), "email.imap_port"),
+        (json!({"password": ""}), "email.password"),
+        (json!({"password": "linha1\nlinha2"}), "email.password"),
+    ] {
+        let r = call("PUT", "/settings", Some(json!({"email": patch.clone()})));
+        assert_eq!(r.status, 422, "{patch}");
+        assert!(r.body["errors"][field].is_string(), "{patch} -> {}", r.body);
+    }
+    let ok = call("PUT", "/settings", Some(json!({"email": {"address": "a@escola.pt", "password": "x"}})));
+    assert_eq!(ok.body["settings"]["email"]["password_set"], true);
+    let cleared = call("PUT", "/settings", Some(json!({"email": {"clear_password": true}})));
+    assert_eq!(cleared.body["settings"]["email"]["password_set"], false);
+    assert!(load_config().get("email_password_enc").is_none());
+}
+
+#[test]
+fn testing_the_email_without_a_password_says_what_is_missing() {
+    let _home = Home::new();
+    save_config(&json_map(json!({"email_method": "imap", "email_address": "aluno@escola.pt"}))).unwrap();
+    let test = call("POST", "/email/test", None);
+    assert_eq!(test.body["ok"], false);
+    assert!(test.body["error"].as_str().unwrap().contains("palavra-passe"), "{}", test.body);
+}
+
+#[cfg(windows)]
+#[test]
+fn when_the_server_has_basic_authentication_disabled_the_message_says_so_plainly() {
+    let Some(node) = node() else { return };
+    let _home = Home::new();
+    let (port, _seen) = fake_imap(vec![]);
+    imap_env(port, &node);
+    call("PUT", "/settings", Some(json!({"email": {"method": "imap", "address": "aluno@escola.pt", "password": "bloqueada"}})));
+    let test = call("POST", "/email/test", None);
+    imap_env_clear();
+    assert_eq!(test.body["ok"], false);
+    let msg = test.body["error"].as_str().unwrap();
+    assert!(msg.contains("desligou o início de sessão por email e palavra-passe") && msg.contains("Basic authentication is disabled"), "{msg}");
+    assert!(!msg.contains("bloqueada"), "{msg}");
 }

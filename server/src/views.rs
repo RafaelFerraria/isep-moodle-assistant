@@ -51,7 +51,7 @@ pub fn overview(days: usize) -> Value {
 /// Emails da origem configurada (Thunderbird ou serviço próprio) dos últimos `days` dias.
 pub fn emails(days: usize, limit: usize) -> Value {
     let config = config::load_config();
-    let method = str_or(&config, "email_method", "thunderbird").to_lowercase();
+    let method = str_or(&config, "email_method", "imap").to_lowercase();
     let source = match mail::source_for(&method) {
         Ok(s) => s,
         Err(e) => return json!({"source": method, "days": days, "total": 0, "items": [], "error": e}),

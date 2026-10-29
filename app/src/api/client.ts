@@ -5,6 +5,9 @@ import type {
   DeviceLogin,
   DevicePoll,
   DigestResult,
+  EmailTest,
+  OAuthFinish,
+  OAuthStart,
   EmailsResult,
   HistoryKind,
   HistoryRecord,
@@ -20,6 +23,7 @@ import type {
   SettingsPatch,
   SettingsUpdateResult,
   Status,
+  ThunderbirdState,
   SummaryTestResult,
   SyncResult,
 } from './types'
@@ -115,6 +119,14 @@ export class AssistantApi {
   startSessionTest = () => this.call<Job<{ ok: boolean }>>('POST', '/session/test')
   addSessionRecipient = (sessionId: string) => this.call<SessionState>('POST', '/session/recipients', { session_id: sessionId })
   removeSessionRecipient = (index: number) => this.call<SessionState>('DELETE', `/session/recipients/${index}`)
+
+  startEmailOAuth = (email: string) => this.call<OAuthStart>('POST', '/email/oauth/start', { email })
+  finishEmailOAuth = (email: string, redirectUrl: string) => this.call<OAuthFinish>('POST', '/email/oauth/finish', { email, redirect_url: redirectUrl })
+  testEmail = () => this.call<EmailTest>('POST', '/email/test')
+  thunderbird = () => this.call<ThunderbirdState>('GET', '/thunderbird')
+  startThunderbirdInstall = () => this.call<Job<ThunderbirdState>>('POST', '/thunderbird/install')
+  connectThunderbirdAccount = (email: string) => this.call<{ ok: boolean; preconfigured: boolean }>('POST', '/thunderbird/account', { email })
+  openThunderbird = () => this.call<{ ok: boolean }>('POST', '/thunderbird/open')
 
   startEmailConnect = () => this.call<DeviceLogin>('POST', '/email/connect/start')
   pollEmailConnect = (deviceCode: string) => this.call<DevicePoll>('POST', '/email/connect/poll', { device_code: deviceCode })

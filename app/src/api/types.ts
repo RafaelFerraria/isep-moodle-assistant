@@ -119,7 +119,7 @@ export interface Settings {
   }
   schedule: { time: string }
   destination: { session_recipients: string[]; session_configured: boolean }
-  email: { method: EmailMethod; address: string; connected: boolean }
+  email: { method: EmailMethod; address: string; connected: boolean; password_set: boolean; oauth_connected: boolean; imap_host: string; imap_port: number }
   setup: { done: boolean }
   student: Student
   moodle: {
@@ -163,7 +163,7 @@ export interface SettingsPatch {
   }
   schedule?: Partial<Settings['schedule']>
   destination?: { session_id?: string }
-  email?: { method?: EmailMethod; address?: string }
+  email?: { method?: EmailMethod; address?: string; imap_host?: string; imap_port?: number; password?: string; clear_password?: boolean; sign_out?: boolean }
   setup?: { done?: boolean }
   moodle?: { sync_dir?: string; download_dir?: string; url?: string; auto_download?: boolean }
   student?: { institution_id?: string; institution_name?: string; course?: string; year?: number }
@@ -271,6 +271,19 @@ export interface SetupState {
   active_job: Job | null
 }
 
+export interface ThunderbirdState {
+  /** O Thunderbird da app está instalado. */
+  embedded: boolean
+  /** Vem dentro da app: não há nada para instalar. */
+  bundled?: boolean
+  version: string | null
+  /** A conta da escola já foi adicionada ao Thunderbird da app e há uma caixa sincronizada. */
+  profile_ready: boolean
+  /** Há um Thunderbird instalado no sistema (o do utilizador). */
+  system_found: boolean
+  source: 'embedded' | 'system' | 'none'
+}
+
 export interface DeviceLogin {
   device_code: string
   user_code: string
@@ -284,6 +297,22 @@ export interface SessionAccount {
   /** Frase de recuperação: só se mostra uma vez, a app não a guarda. */
   mnemonic: string
   state: SessionState
+}
+
+export interface OAuthStart {
+  auth_url: string
+  redirect_uri: string
+}
+
+export interface OAuthFinish {
+  ok: boolean
+  error?: string
+}
+
+export interface EmailTest {
+  ok: boolean
+  count?: number
+  error?: string
 }
 
 export type DevicePoll = { status: 'pending' } | { status: 'done' } | { status: 'failed'; message: string }

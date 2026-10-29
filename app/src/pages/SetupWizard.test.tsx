@@ -10,7 +10,7 @@ function fresh() {
   const mock = new MockTransport()
   mock.settings.setup.done = false
   mock.settings.student = { institution_id: '', institution_name: '', course: '', year: 0, configured: false }
-  mock.settings.email = { method: 'imap', address: '', connected: false }
+  mock.settings.email = { method: 'imap', address: '', connected: false, password_set: false, oauth_connected: false, imap_host: '', imap_port: 993 }
   mock.settings.moodle = { ...mock.settings.moodle, url: null, url_source: 'missing' }
   mock.session = { ...mock.session, bot_created: false, bot_id: '', recipients: [], configured: false }
   mock.moodle.configured = false
@@ -60,37 +60,71 @@ describe('SetupWizard', () => {
     expect(await screen.findByText('Indica o nome da instituição.')).toBeInTheDocument()
   })
 
-  it('liga o email dentro da app: escreve o endereço, recebe o código e fica ligado', async () => {
-    const user = userEvent.setup()
-    const mock = fresh()
+  async function toEmailStep(user: ReturnType<typeof userEvent.setup>, mock: MockTransport) {
     renderWithApi(<SetupWizard onDone={() => {}} />, { mock })
     await fillStudent(user)
     await user.click(screen.getByRole('button', { name: 'Continuar' }))
     await screen.findByRole('heading', { name: 'O teu email' })
+  }
 
-    const connect = screen.getByRole('button', { name: 'Ligar o meu email' })
-    expect(connect).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Configurar mais tarde' })).toBeInTheDocument()
-    await user.type(screen.getByLabelText('O teu email da escola'), 'aluno@escola.pt')
-    await user.click(connect)
-    expect(await screen.findByLabelText('Código de autorização')).toHaveTextContent('ABCD-1234')
-    expect(mock.settings.email).toMatchObject({ method: 'imap', address: 'aluno@escola.pt' })
-
-    mock.deviceApproved = true
-    expect(await screen.findByText(/Email ligado/)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Continuar' })).toBeInTheDocument())
-  })
-
-  it('rejeita um endereço de email inválido antes de pedir o código', async () => {
+  it('o email faz-se dentro da app: email, palavra-passe e servidor, sem Thunderbird nem janelas de terceiros', async () => {
     const user = userEvent.setup()
     const mock = fresh()
-    renderWithApi(<SetupWizard onDone={() => {}} />, { mock })
-    await fillStudent(user)
-    await user.click(screen.getByRole('button', { name: 'Continuar' }))
-    await user.type(await screen.findByLabelText('O teu email da escola'), 'sem-arroba')
-    expect(screen.getByText('Endereço de email inválido.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Ligar o meu email' })).toBeDisabled()
-    expect(mock.requests.some((r) => r.path === '/email/connect/start')).toBe(false)
+    await toEmailStep(user, mock)
+    expect(screen.queryByText(/Thunderbird/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar e testar a ligação' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Configurar mais tarde' })).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('O teu email da escola'), '1234567@isep.ipp.pt')
+    // o servidor preenche-se sozinho pelo fornecedor do email
+    expect(screen.getByLabelText('Servidor IMAP')).toHaveValue('outlook.office365.com')
+    expect(screen.getByLabelText('Porta')).toHaveValue('993')
+    expect(screen.getByRole('button', { name: 'Guardar e testar a ligação' })).toBeDisabled() // falta a palavra-passe
+
+    await user.type(screen.getByLabelText('Palavra-passe do email'), 'segredo-da-escola')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText(/Ligado\. Encontrei 2 email\(s\) nos últimos 3 dias\./)).toBeInTheDocument()
+
+    expect(mock.settings.email).toMatchObject({ method: 'imap', address: '1234567@isep.ipp.pt', imap_host: 'outlook.office365.com', imap_port: 993, password_set: true, connected: true })
+    expect(mock.lastEmailPassword).toBe('segredo-da-escola')
+    // a palavra-passe sai do campo e nunca é mostrada
+    expect(screen.getByLabelText('Palavra-passe do email')).toHaveValue('')
+    expect(document.body.textContent).not.toContain('segredo-da-escola')
+    expect(await screen.findByRole('button', { name: 'Continuar' })).toBeEnabled()
+  })
+
+  it('um fornecedor desconhecido pede o servidor; com um servidor mal escrito mostra o erro', async () => {
+    const user = userEvent.setup()
+    const mock = fresh()
+    await toEmailStep(user, mock)
+    await user.type(screen.getByLabelText('O teu email da escola'), 'aluno@escola-pequena.pt')
+    expect(screen.getByLabelText('Servidor IMAP')).toHaveValue('')
+    await user.type(screen.getByLabelText('Palavra-passe do email'), 'x')
+    expect(screen.getByRole('button', { name: 'Guardar e testar a ligação' })).toBeDisabled()
+    await user.type(screen.getByLabelText('Servidor IMAP'), 'sem espaços')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText('endereço do servidor inválido (ex.: outlook.office365.com)')).toBeInTheDocument()
+    await user.clear(screen.getByLabelText('Servidor IMAP'))
+    await user.type(screen.getByLabelText('Servidor IMAP'), 'mail.escola-pequena.pt')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText(/Ligado\./)).toBeInTheDocument()
+    expect(mock.settings.email.imap_host).toBe('mail.escola-pequena.pt')
+  })
+
+  it('se o servidor recusar a palavra-passe, explica porquê e deixa corrigir', async () => {
+    const user = userEvent.setup()
+    const mock = fresh()
+    mock.emailTest = { ok: false, error: 'Não foi possível ler os emails: o servidor recusou o email ou a palavra-passe (LOGIN failed.)' }
+    await toEmailStep(user, mock)
+    await user.type(screen.getByLabelText('O teu email da escola'), 'aluno@isep.ipp.pt')
+    await user.type(screen.getByLabelText('Palavra-passe do email'), 'errada')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText(/recusou o email ou a palavra-passe/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('errada')
+    mock.emailTest = { ok: true, count: 5 }
+    await user.type(screen.getByLabelText('Palavra-passe do email'), 'certa')
+    await user.click(screen.getByRole('button', { name: 'Guardar e testar a ligação' }))
+    expect(await screen.findByText(/Encontrei 5 email\(s\)/)).toBeInTheDocument()
   })
 
   it('no Moodle usa o da instituição quando existe e pede e valida o endereço quando não existe', async () => {

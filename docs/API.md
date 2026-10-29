@@ -64,10 +64,13 @@ A UI deve ler este ficheiro, confirmar que o servidor responde em `/api/v1/healt
 | POST | `/session/pair` | **Tarefa**: espera a primeira mensagem ao bot e guarda quem a enviou como destinatário. |
 | POST | `/session/test` | **Tarefa**: envia uma mensagem de teste. |
 | POST, DELETE | `/session/recipients`, `/session/recipients/{índice}` | Adiciona (`{session_id}`) ou remove um destinatário. |
-| POST | `/email/connect/start` | Inicia a ligação da conta Microsoft (código de dispositivo). |
-| POST | `/email/connect/poll` | `{device_code}`: `pending`, `done` ou `failed`. Guarda o token cifrado quando termina. |
+| POST | `/email/oauth/start` | `{email}`: devolve `auth_url` (página de entrada da Microsoft, com PKCE) e `redirect_uri` (`https://localhost`). |
+| POST | `/email/oauth/finish` | `{email, redirect_url}`: valida o estado, troca o código e guarda o token de renovação cifrado. Devolve `{ok}` ou `{ok:false, error}`. |
+| POST | `/email/test` | Lê os últimos 3 dias com o que está guardado: `{ok, count}` ou `{ok:false, error}`. |
+| POST | `/email/connect/start`, `/email/connect/poll` | Ligação por código de dispositivo (mantida, mas muitas escolas bloqueiam-na). |
+| GET | `/thunderbird` | (modo antigo) estado do Thunderbird da app. `POST /thunderbird/install` (tarefa), `/thunderbird/open` e `/thunderbird/account`. |
 
-As definições ganham `email.connected`, `setup.done` e os campos editáveis `email.method` (`thunderbird` ou `graph`), `email.address` e `setup.done`.
+As definições ganham `setup.done` e, em `email`: `connected`, `password_set`, `oauth_connected`, `imap_host` e `imap_port`. Editáveis: `email.method` (`imap` ou `thunderbird`), `email.address`, `email.imap_host`, `email.imap_port`, `email.password` (só de escrita, guardada cifrada), `email.clear_password`, `email.sign_out` e `setup.done`.
 
 ### Tarefas
 
@@ -82,7 +85,8 @@ As definições ganham `email.connected`, `setup.done` e os campos editáveis `e
                    "ai_api_key_set": true, "ai_api_key_env": "OPENAI_API_KEY", "ai_api_key_env_set": false },
   "schedule":    { "time": "18:00" },
   "destination": { "session_recipients": ["05ab12…cd34"], "session_configured": true },
-  "email":       { "method": "thunderbird", "address": "numero@isep.ipp.pt" },
+  "email":       { "method": "imap", "address": "numero@isep.ipp.pt", "connected": true, "password_set": false,
+                   "oauth_connected": true, "imap_host": "outlook.office365.com", "imap_port": 993 },
   "moodle":      { "sync_dir": "…", "download_dir": "…" }
 }
 ```

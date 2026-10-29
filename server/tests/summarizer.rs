@@ -155,8 +155,8 @@ fn forum_announcements_are_deduplicated_across_courses() {
 
 #[test]
 fn student_forum_posts_are_labelled_as_colleagues() {
-    let out = s::build_summary(&[forum_mail("ARQCP", "Dúvida", "DIAS 1251344", "Como funciona?")], &[], now());
-    assert!(out.contains("DIAS 1251344 (colega)"), "{out}");
+    let out = s::build_summary(&[forum_mail("ARQCP", "Dúvida", "SILVA 1234567", "Como funciona?")], &[], now());
+    assert!(out.contains("SILVA 1234567 (colega)"), "{out}");
 }
 
 #[test]

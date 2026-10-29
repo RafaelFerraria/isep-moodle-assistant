@@ -1,15 +1,18 @@
 # Interface (React + TypeScript + Tailwind)
 
-Três ecrãs sobre a API local (`../docs/API.md`):
+Sobre a API local (`../docs/API.md`). Na primeira vez abre-se o **assistente de configuração**; depois, seis páginas:
 
-- **Estado**: saúde geral, próximo/último resumo, Moodle, modo de resumo, verificações e as ações *Pré-visualizar*, *Enviar agora* e *Sincronizar Moodle* (com progresso).
-- **Histórico**: resumos enviados, sincronizações, ficheiros novos do Moodle e registos.
-- **Definições**: modo de resumo (Regras ou IA: CLI com login ou token de API) com teste, hora do resumo, destino Session, conta do Moodle e pastas. Os segredos só se escrevem, nunca se mostram.
+- **Resumo**: o resumo de hoje em destaque, o seletor de 7/15/30 dias, totais e as ações *Pré-visualizar* e *Enviar agora*.
+- **Emails**: emails lidos da caixa, com o aviso dos que já entraram num resumo.
+- **Moodle**: ficheiros pendentes, em curso (com percentagem) e já descarregados, e *Sincronizar agora*.
+- **Session**: criar o bot, ligar o teu Session (deteção automática ou ID colado), destinatários e mensagem de teste.
+- **Histórico**: execuções e registos dos últimos 7 dias.
+- **Definições**: curso, email (entrar com a conta da escola ou palavra-passe), tipo de resumo (Regras ou IA) com teste, regras, hora, Moodle, pastas, notificações e verificações. Os segredos só se escrevem, nunca se mostram.
 
 ```bat
 npm install
 npm run dev       :: http://127.0.0.1:5173 — modo demonstração (dados simulados)
-npm test          :: Vitest + Testing Library (54 testes)
+npm test          :: Vitest + Testing Library (105 testes)
 npm run build     :: dist/ (usado pelo Electron e, mais tarde, pelo Capacitor)
 ```
 
@@ -26,8 +29,8 @@ npm run build     :: dist/ (usado pelo Electron e, mais tarde, pelo Capacitor)
 ```
 src/api/        tipos do contrato, transportes, cliente (AssistantApi), mock
 src/lib/        formatação pt-PT, contexto, hooks (useAsync, useJobRunner)
-src/components/ primitivas de interface (Tailwind) e o painel de tarefas
-src/pages/      Estado, Histórico, Definições (+ testes ao lado)
+src/components/ primitivas de interface (Tailwind), painel de tarefas, email, Session, Moodle
+src/pages/      Resumo, Emails, Moodle, Session, Histórico, Definições e o assistente (+ testes ao lado)
 ```
 
 ## Telemóvel (mais tarde)

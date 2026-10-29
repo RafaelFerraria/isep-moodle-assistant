@@ -358,7 +358,7 @@ export function SettingsPage() {
         <StudentFields value={draft.student} onChange={(student) => set({ student })} errors={errors} />
       </Card>
 
-      <Card title="Email" subtitle="A app lê o email da tua escola diretamente, sem precisares de mais nenhum programa.">
+      <Card title="Email" subtitle="A app lê os emails da escola diretamente, sem precisares de mais nenhum programa. Só lê; nunca apaga nem envia.">
         <EmailSetup email={s.email} onChanged={() => { void settings.reload(); void status.reload() }} />
       </Card>
 

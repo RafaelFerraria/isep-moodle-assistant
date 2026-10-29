@@ -12,6 +12,7 @@ pub mod moodle_report;
 pub mod summarizer;
 pub mod dpapi;
 pub mod mail;
+pub mod thunderbird;
 pub mod oauth;
 pub mod imap;
 pub mod institutions;
