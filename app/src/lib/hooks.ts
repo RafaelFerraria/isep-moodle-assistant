@@ -48,7 +48,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], intervalMs = 
   return { data, error, loading, reload }
 }
 
-export type JobKind = 'digest_preview' | 'digest' | 'moodle_sync'
+export type JobKind = 'digest_preview' | 'digest' | 'moodle_sync' | 'session_pair' | 'session_test'
 
 export interface JobRunner {
   job: Job | null
@@ -101,8 +101,14 @@ export function useJobRunner(onFinished?: (job: Job) => void): JobRunner {
       setError(null)
       setJob(null)
       try {
-        const started =
-          kind === 'digest_preview' ? await api.startDigestPreview() : kind === 'digest' ? await api.startDigestRun() : await api.startMoodleSync()
+        const starters: Record<JobKind, () => Promise<Job>> = {
+          digest_preview: () => api.startDigestPreview(),
+          digest: () => api.startDigestRun(),
+          moodle_sync: () => api.startMoodleSync(),
+          session_pair: () => api.startSessionPair(),
+          session_test: () => api.startSessionTest(),
+        }
+        const started = await starters[kind]()
         if (!alive.current) return
         setJob(started)
         poll(started.id, started.progress)

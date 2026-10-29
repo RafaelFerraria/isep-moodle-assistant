@@ -40,23 +40,19 @@ describe('HistoryPage', () => {
     expect(screen.getByLabelText('Falhou')).toBeInTheDocument()
   })
 
-  it('lista os ficheiros do Moodle com tipo e disciplina', async () => {
-    const { user } = await loaded()
-    await user.click(screen.getByRole('tab', { name: 'Ficheiros do Moodle' }))
-    const table = await screen.findByRole('table')
-    expect(within(table).getByText('Enunciado Sprint 2.pdf')).toBeInTheDocument()
-    expect(within(table).getByText('Laboratório / Projeto III')).toBeInTheDocument()
-    expect(within(table).getByText('atualizado')).toBeInTheDocument()
-    expect(within(table).getByText('471 KB')).toBeInTheDocument()
+  it('já não mostra os ficheiros do Moodle (têm página própria) e só guarda 7 dias', async () => {
+    await loaded()
+    expect(screen.queryByRole('tab', { name: 'Ficheiros do Moodle' })).not.toBeInTheDocument()
+    expect(screen.getByText(/últimos 7 dias/i)).toBeInTheDocument()
   })
 
-  it('mostra os registos e deixa mudar de ficheiro', async () => {
+  it('mostra os registos dos últimos 7 dias e deixa mudar de ficheiro', async () => {
     const { user, mock } = await loaded()
+    expect(mock.requests.some((r) => r.path === '/activity?days=7')).toBe(true)
     await user.click(screen.getByRole('tab', { name: 'Registos' }))
-    expect(await screen.findByLabelText('Registos')).toHaveTextContent('(mock) sem registos reais')
+    expect(await screen.findByLabelText('Registos')).toHaveTextContent('INÍCIO DA EXECUÇÃO DO NOTIFICADOR')
     await user.selectOptions(screen.getByLabelText('Ficheiro de registo'), 'sync')
-    await screen.findByLabelText('Registos')
-    expect(mock.requests.some((r) => r.path.startsWith('/logs/sync'))).toBe(true)
+    expect(await screen.findByLabelText('Registos')).toHaveTextContent('A autenticar no Moodle do ISEP')
   })
 
   it('mostra uma mensagem quando não há histórico', async () => {

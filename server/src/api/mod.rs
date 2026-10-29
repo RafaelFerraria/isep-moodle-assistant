@@ -3,6 +3,9 @@ pub mod jobs;
 pub mod security;
 
 use crate::config;
+use crate::graph;
+use crate::session;
+use crate::views;
 use crate::digest::{moodle_dir_of, run_digest, Deps};
 use crate::history;
 use crate::moodle_sync;
@@ -102,6 +105,10 @@ pub fn handle(app: &App, req: &Req) -> Resp {
         ["status"] | ["settings"] | ["history"] | ["jobs"] | ["moodle", "new-files"] => Some((if segments[0] == "settings" { &["GET", "PUT"] } else { &["GET"] }, true)),
         ["summary", "test"] | ["schedule", "register"] | ["digest", "preview"] | ["digest", "run"] | ["moodle", "sync"] => Some((&["POST"], true)),
         ["moodle", "credentials"] => Some((&["PUT"], true)),
+        ["overview"] | ["emails"] | ["activity"] | ["session"] | ["setup"] | ["moodle", "files"] => Some((&["GET"], true)),
+        ["session", "bot"] | ["session", "pair"] | ["session", "test"] | ["session", "recipients"] => Some((&["POST"], true)),
+        ["session", "recipients", _] => Some((&["DELETE"], true)),
+        ["email", "connect", "start"] | ["email", "connect", "poll"] => Some((&["POST"], true)),
         ["jobs", _] | ["history", _] | ["logs", _] => Some((&["GET"], true)),
         _ => None,
     };
@@ -166,6 +173,88 @@ pub fn handle(app: &App, req: &Req) -> Resp {
             }) {
                 Ok(job) => resp(202, job),
                 Err(b) => busy(b),
+            }
+        }
+        ("GET", ["overview"]) => match int_param(req, "days", 7, 1, 30) {
+            Ok(days) => resp(200, views::overview(days)),
+            Err(e) => e,
+        },
+        ("GET", ["emails"]) => match (int_param(req, "days", 7, 1, 30), int_param(req, "limit", 100, 1, 300)) {
+            (Ok(days), Ok(limit)) => resp(200, views::emails(days, limit)),
+            (Err(e), _) | (_, Err(e)) => e,
+        },
+        ("GET", ["activity"]) => match int_param(req, "days", 7, 1, 7) {
+            Ok(days) => resp(200, views::activity(days)),
+            Err(e) => e,
+        },
+        ("GET", ["moodle", "files"]) => match int_param(req, "limit", 100, 1, 500) {
+            Ok(limit) => resp(200, views::moodle_files(limit)),
+            Err(e) => e,
+        },
+        ("GET", ["setup"]) => resp(200, service::get_setup(app.jobs.active().unwrap_or(Value::Null))),
+        ("GET", ["session"]) => resp(200, session::state(&config::load_config())),
+        ("POST", ["session", "bot"]) => {
+            let force = body_json(req).ok().and_then(|b| b["force"].as_bool()).unwrap_or(false);
+            match session::create_bot(force) {
+                Ok(v) => resp(200, v),
+                Err(e) => detail(400, &e),
+            }
+        }
+        ("POST", ["session", "pair"]) => {
+            match app.jobs.submit("session_pair", move |progress| session::pair(std::time::Duration::from_secs(300), &|l| progress(l))) {
+                Ok(job) => resp(202, job),
+                Err(b) => busy(b),
+            }
+        }
+        ("POST", ["session", "test"]) => {
+            match app.jobs.submit("session_test", move |progress| {
+                let ok = session::send_test(&|l| progress(l));
+                Ok(json!({"ok": ok}))
+            }) {
+                Ok(job) => resp(202, job),
+                Err(b) => busy(b),
+            }
+        }
+        ("POST", ["session", "recipients"]) => {
+            let body = match body_json(req) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            match session::add_recipient(body["session_id"].as_str().unwrap_or("")) {
+                Ok(()) => resp(200, session::state(&config::load_config())),
+                Err(e) => resp(422, json!({"detail": "Session ID inválido.", "errors": {"session_id": e}})),
+            }
+        }
+        ("DELETE", ["session", "recipients", index]) => match index.parse::<usize>().ok().map(session::remove_recipient) {
+            Some(Ok(())) => resp(200, session::state(&config::load_config())),
+            Some(Err(e)) => detail(404, &e),
+            None => detail(422, "Índice inválido."),
+        },
+        ("POST", ["email", "connect", "start"]) => match graph::start_device_login(&config::load_config()) {
+            Ok(v) => resp(200, v),
+            Err(e) => detail(502, &e),
+        },
+        ("POST", ["email", "connect", "poll"]) => {
+            let body = match body_json(req) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            let Some(code) = body["device_code"].as_str() else { return detail(422, "device_code é obrigatório.") };
+            let mut cfg = config::load_config();
+            match graph::poll_device_login(&cfg, code) {
+                Ok(graph::Poll::Pending) => resp(200, json!({"status": "pending"})),
+                Ok(graph::Poll::Failed(m)) => resp(200, json!({"status": "failed", "message": m})),
+                Ok(graph::Poll::Done { refresh_token }) => {
+                    let saved = graph::store_refresh_token(&mut cfg, &refresh_token).and_then(|_| {
+                        cfg.insert("email_method".into(), json!("graph"));
+                        config::save_config(&cfg).map_err(|e| e.to_string())
+                    });
+                    match saved {
+                        Ok(()) => resp(200, json!({"status": "done"})),
+                        Err(e) => resp(200, json!({"status": "failed", "message": e})),
+                    }
+                }
+                Err(e) => detail(502, &e),
             }
         }
         ("GET", ["jobs"]) => match int_param(req, "limit", 10, 1, 30) {

@@ -28,6 +28,10 @@ pub fn save_config(config: &Json) -> std::io::Result<()> {
     write_json_atomic(&paths::email_config(), config)
 }
 
+pub fn valid_session_id(value: &str) -> bool {
+    SESSION_ID_RE.is_match(value)
+}
+
 pub fn mask_session_id(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() > 12 {
@@ -57,6 +61,15 @@ fn or<'a>(config: &'a Json, key: &str, default: &'a str) -> &'a str {
     crate::util::str_or(config, key, default)
 }
 
+/// A configuração inicial está concluída? Uma instalação anterior já funcional (Session configurado) conta como concluída,
+/// para quem já usava a app não ter de repetir o assistente.
+pub fn setup_done(config: &Json) -> bool {
+    if let Some(v) = config.get("setup_done").and_then(Value::as_bool) {
+        return v;
+    }
+    !recipients_of(config).is_empty() && !str_of(config, "session_mnemonic").is_empty()
+}
+
 /// Definições para mostrar na UI. Os segredos aparecem só como `..._set: true/false`.
 pub fn public_settings(config: &Json) -> Value {
     let api_type = or(config, "ai_api_type", "openai");
@@ -84,7 +97,9 @@ pub fn public_settings(config: &Json) -> Value {
         "email": {
             "method": or(config, "email_method", "thunderbird"),
             "address": str_of(config, "email_address"),
+            "connected": crate::graph::is_connected(config),
         },
+        "setup": { "done": setup_done(config) },
         "moodle": {
             "sync_dir": or(config, "moodle_sync_dir", &paths::sync_dir().to_string_lossy()),
             "download_dir": or(config, "moodle_download_dir", &paths::default_download_dir().to_string_lossy()),
@@ -233,6 +248,36 @@ pub fn apply_settings_patch(config: &Json, patch: &Value) -> Result<(Json, Vec<S
                 new.insert("session_group_id".into(), json!(sid));
             } else {
                 errors.insert("destination.session_id".into(), json!("deve ter 66 caracteres hexadecimais e começar por 05"));
+            }
+        }
+    }
+
+    if let Some(email) = sub(patch, "email") {
+        if let Some(v) = email.get("method") {
+            match one_of(v, &["thunderbird", "graph"]) {
+                Some(m) => {
+                    new.insert("email_method".into(), json!(m));
+                }
+                None => err(&mut errors, "email.method", &list(&["graph", "thunderbird"])),
+            }
+        }
+        if let Some(v) = email.get("address") {
+            match v.as_str().map(str::trim) {
+                Some(a) if a.is_empty() || a.contains('@') => {
+                    new.insert("email_address".into(), json!(a));
+                }
+                _ => err(&mut errors, "email.address", "endereço de email inválido"),
+            }
+        }
+    }
+
+    if let Some(setup) = sub(patch, "setup") {
+        if let Some(v) = setup.get("done") {
+            match v.as_bool() {
+                Some(b) => {
+                    new.insert("setup_done".into(), json!(b));
+                }
+                None => err(&mut errors, "setup.done", "deve ser verdadeiro ou falso"),
             }
         }
     }

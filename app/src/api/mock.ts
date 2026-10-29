@@ -1,7 +1,7 @@
 // Servidor simulado em memória: serve a app em modo demonstração (sem backend) e os testes.
 // Reproduz as regras do contrato real: validação com erros por campo, segredos só de escrita, uma tarefa de cada vez.
 import type { Transport, TransportResponse } from './transport'
-import type { HistoryRecord, Job, NewFile, Settings, SettingsPatch, Status } from './types'
+import type { Activity, DevicePoll, EmailItem, EmailsResult, HistoryRecord, Job, MoodleFiles, NewFile, Overview, SessionState, SetupState, Settings, SettingsPatch, Status } from './types'
 
 export interface MockOptions {
   /** Duração simulada das tarefas (ms). 0 = terminam no pedido seguinte ao arranque. */
@@ -23,6 +23,13 @@ export class MockTransport implements Transport {
   newFiles: NewFile[]
   moodle = { configured: true, username: '1234567', last_sync_date: null as string | null }
   extraChecks: Status['checks'] = []
+  session: SessionState = { node_ok: true, script_ok: true, bot_created: true, bot_id: '05bb11…c0de22', recipients: ['05a79f…d22077'], configured: true }
+  emails: EmailItem[] = []
+  emailError: string | null = null
+  moodleProgress: MoodleFiles
+  /** Os testes põem `true` para simular que o utilizador autorizou a conta Microsoft. */
+  deviceApproved = false
+  logs: Activity['logs'] = { notifier: ['[2026-10-26 18:00:01] === INÍCIO DA EXECUÇÃO DO NOTIFICADOR ISEP ==='], sync: ['[2026-10-26 18:00:05] A autenticar no Moodle do ISEP...'] }
   /** Último token recebido (só para os testes verificarem que chegou ao servidor). */
   lastApiKey = ''
   private jobs = new Map<string, Job>()
@@ -49,7 +56,8 @@ export class MockTransport implements Transport {
       },
       schedule: { time: '18:00' },
       destination: { session_recipients: ['05a79f…d22077'], session_configured: true },
-      email: { method: 'thunderbird', address: '1234567@isep.ipp.pt' },
+      email: { method: 'thunderbird', address: '1234567@isep.ipp.pt', connected: false },
+      setup: { done: true },
       moodle: { sync_dir: 'C:/isep-moodle-assistant/MoodleSync', download_dir: 'C:/Users/aluno/Downloads/Moodle_ISEP' },
     }
     this.history = [
@@ -69,6 +77,16 @@ export class MockTransport implements Transport {
         details: { emails_found: 3, emails_new: 1, moodle_files: 0, sent: true, skipped: false, ai_used: true, ai_fallback: false },
       },
     ].map((r) => ({ ...r, has_summary: !!r.summary })) as HistoryRecord[]
+    this.emails = [
+      { subject: 'LAPR3: Sprint 2 - Entrega', sender: '"Docente LAPR3" <lapr3@isep.ipp.pt>', received_time: ago(1), preview: 'A entrega do Sprint 2 é amanhã às 23:59.', message_id: '<e1@isep>', in_digest: false },
+      { subject: 'Ementa Semanal - Bar edifício E', sender: 'ISEP <estudantes@isep.ipp.pt>', received_time: ago(26), preview: 'Segue a ementa da semana.', message_id: '<e2@isep>', in_digest: true },
+    ]
+    this.moodleProgress = {
+      running: false, started: ago(3), finished: ago(3), courses_total: 6, courses_done: 6, current_course: '', percent: 100,
+      counts: { pending: 0, downloading: 0, done: 1, unchanged: 3, error: 0 },
+      items: [{ course: 'DEI - Laboratório / Projeto III', section: 'Sprint 2', name: 'Enunciado Sprint 2.pdf', state: 'done', size: 482000, error: null }],
+      downloaded: [], moodle: { configured: true, username: '1234567', download_dir: 'C:/Users/aluno/Downloads/Moodle_ISEP', last_sync_date: null },
+    }
     this.newFiles = [
       { ts: ago(3), kind: 'novo', course: 'DEI - Laboratório / Projeto III', section: 'Sprint 2', name: 'Enunciado Sprint 2.pdf', path: 'LAPR3/Enunciado Sprint 2.pdf', size: 482000 },
       { ts: ago(30), kind: 'atualizado', course: 'DEI - Estruturas de Informação', section: 'Aulas', name: 'Slides T3.pdf', path: 'ESINF/Slides T3.pdf', size: 913000 },
@@ -111,6 +129,22 @@ export class MockTransport implements Transport {
       const rec = this.history.find((r) => r.id === decodeURIComponent(item[1]))
       return rec ? ok(rec) : fail(404, 'Registo desconhecido.')
     }
+    if (route === 'GET /overview') return ok(this.overview(Number(q.get('days') ?? 7)))
+    if (route === 'GET /emails') return ok(this.emailsResult(Number(q.get('days') ?? 7)))
+    if (route === 'GET /moodle/files') return ok({ ...this.moodleProgress, downloaded: this.newFiles, moodle: { ...this.moodleProgress.moodle, configured: this.moodle.configured, username: this.moodle.username } })
+    if (route === 'GET /activity') return ok(this.activity(Number(q.get('days') ?? 7)))
+    if (route === 'GET /setup') return ok(this.setupState())
+    if (route === 'GET /session') return ok(this.session)
+    if (route === 'POST /session/bot') return this.createBot((body as { force?: boolean } | undefined)?.force === true)
+    if (route === 'POST /session/pair') return this.startJob('session_pair', false)
+    if (route === 'POST /session/test') return this.startJob('session_test', false)
+    if (route === 'POST /session/recipients') return this.addRecipient((body as { session_id: string }).session_id)
+    const rm = /^DELETE \/session\/recipients\/(.+)$/.exec(route)
+    if (rm) return this.removeRecipient(Number(rm[1]))
+    if (route === 'POST /email/connect/start') {
+      return ok({ device_code: 'dc-mock', user_code: 'ABCD-1234', verification_uri: 'https://microsoft.com/devicelogin', interval: 1, expires_in: 900 })
+    }
+    if (route === 'POST /email/connect/poll') return ok(this.pollDevice())
     if (route === 'GET /moodle/new-files') return ok({ items: this.newFiles.slice(0, Number(q.get('limit') ?? 100)) })
     const log = /^GET \/logs\/(.+)$/.exec(route)
     if (log) {
@@ -201,6 +235,80 @@ export class MockTransport implements Transport {
     }
   }
 
+  private overview(days: number): Overview {
+    const now = this.opts.now()
+    const since = now.getTime() - days * 86_400_000
+    const todayKey = iso(now).slice(0, 10)
+    const digests = this.history
+      .filter((r) => r.kind === 'digest' && new Date(r.started.replace(' ', 'T')).getTime() >= since)
+      .slice()
+      .reverse()
+    const withText = digests.filter((r) => r.summary)
+    const num = (r: HistoryRecord, k: string) => Number((r.details as Record<string, unknown>)[k] ?? 0)
+    return {
+      days,
+      today: withText.find((r) => r.started.startsWith(todayKey)) ?? null,
+      latest: withText[0] ?? null,
+      items: digests,
+      totals: {
+        runs: digests.length,
+        sent: digests.filter((r) => (r.details as Record<string, unknown>).sent === true).length,
+        failed: digests.filter((r) => !r.ok).length,
+        emails: digests.reduce((a, r) => a + num(r, 'emails_new'), 0),
+        moodle_files: digests.reduce((a, r) => a + num(r, 'moodle_files'), 0),
+      },
+    }
+  }
+
+  private emailsResult(days: number): EmailsResult {
+    if (this.emailError) return { source: this.settings.email.method, days, total: 0, items: [], error: this.emailError }
+    return { source: this.settings.email.method, days, total: this.emails.length, items: this.emails, error: null }
+  }
+
+  private activity(days: number): Activity {
+    return { days, history: this.history.slice().reverse().map(strip), logs: this.logs }
+  }
+
+  private setupState(): SetupState {
+    const s = this.settings
+    const emailOk = s.email.method === 'graph' ? s.email.connected : true
+    const steps: Status['checks'] = [
+      { id: 'email', label: 'Emails', ok: emailOk, detail: '', required: true },
+      { id: 'moodle', label: 'Moodle', ok: this.moodle.configured, detail: '', required: false },
+      { id: 'session', label: 'Session', ok: this.session.configured, detail: '', required: true },
+      { id: 'summary', label: 'Tipo de resumo', ok: true, detail: '', required: false },
+      { id: 'schedule', label: 'Agendamento', ok: true, detail: '', required: true },
+    ]
+    return { done: s.setup.done, email_method: s.email.method, steps, ready: steps.every((c) => c.ok || !c.required), active_job: null }
+  }
+
+  private createBot(force: boolean): TransportResponse {
+    if (this.session.bot_created && !force) return ok(this.session)
+    this.session = { ...this.session, bot_created: true, bot_id: '05cc22…beef33', recipients: [], configured: false }
+    return ok(this.session)
+  }
+
+  private addRecipient(id: string): TransportResponse {
+    if (!SESSION_RE.test(id.trim())) return fail(422, 'Session ID inválido.', { errors: { session_id: 'O Session ID deve ter 66 caracteres e começar por 05.' } })
+    const masked = `${id.slice(0, 6)}…${id.slice(-4)}`
+    if (!this.session.recipients.includes(masked)) this.session.recipients = [...this.session.recipients, masked]
+    this.session = { ...this.session, configured: this.session.bot_created && this.session.recipients.length > 0 }
+    return ok(this.session)
+  }
+
+  private removeRecipient(index: number): TransportResponse {
+    if (!Number.isInteger(index) || index < 0 || index >= this.session.recipients.length) return fail(404, 'Destinatário desconhecido.')
+    this.session = { ...this.session, recipients: this.session.recipients.filter((_, i) => i !== index) }
+    this.session.configured = this.session.bot_created && this.session.recipients.length > 0
+    return ok(this.session)
+  }
+
+  private pollDevice(): DevicePoll {
+    if (!this.deviceApproved) return { status: 'pending' }
+    this.settings = { ...this.settings, email: { ...this.settings.email, method: 'graph', connected: true } }
+    return { status: 'done' }
+  }
+
   // ---------------------------------------------------------------- escrita
 
   private putSettings(patch: SettingsPatch): TransportResponse {
@@ -258,6 +366,15 @@ export class MockTransport implements Transport {
       if (SESSION_RE.test(sid)) next.destination = { session_configured: true, session_recipients: [`${sid.slice(0, 6)}…${sid.slice(-4)}`] }
       else errors['destination.session_id'] = 'deve ter 66 caracteres hexadecimais e começar por 05'
     }
+    if (patch.email?.method !== undefined) {
+      if (patch.email.method === 'thunderbird' || patch.email.method === 'graph') next.email.method = patch.email.method
+      else errors['email.method'] = "deve ser um de ['graph', 'thunderbird']"
+    }
+    if (patch.email?.address !== undefined) {
+      if (patch.email.address === '' || patch.email.address.includes('@')) next.email.address = patch.email.address
+      else errors['email.address'] = 'endereço de email inválido'
+    }
+    if (patch.setup?.done !== undefined) next.setup.done = patch.setup.done
     if (patch.moodle?.download_dir !== undefined) next.moodle.download_dir = patch.moodle.download_dir
     if (patch.moodle?.sync_dir !== undefined) next.moodle.sync_dir = patch.moodle.sync_dir
     if (Object.keys(errors).length) return fail(422, 'Definições inválidas.', { errors })
@@ -286,7 +403,11 @@ export class MockTransport implements Transport {
     this.jobs.set(job.id, job)
     this.order.push(job.id)
     const lines =
-      kind === 'moodle_sync'
+      kind === 'session_pair'
+        ? ['À espera da tua mensagem para o bot.', 'Mensagem recebida: destinatário guardado.']
+        : kind === 'session_test'
+          ? ['A enviar resumo para o Session (Destino: 05a79f...)...', 'Mensagem Session enviada com sucesso para 05a79f...!']
+          : kind === 'moodle_sync'
         ? ['A autenticar no Moodle do ISEP...', 'Foram encontradas 6 disciplinas.', 'Sincronização terminada: 1 ficheiros novos/atualizados, 0 erros.']
         : ['A procurar emails recebidos...', 'Emails encontrados: 3', 'A gerar resumo e priorização dos emails...', preview ? 'Resumo gerado com sucesso!' : 'Mensagem Session enviada com sucesso.']
     const finish = () => {
@@ -294,7 +415,12 @@ export class MockTransport implements Transport {
       job.progress_total = lines.length
       job.status = 'done'
       job.finished = iso(this.opts.now())
-      if (kind === 'moodle_sync') {
+      if (kind === 'session_pair') {
+        this.addRecipient(`05${'ab'.repeat(32)}`)
+        job.result = { session_id: '05abab…abab' }
+      } else if (kind === 'session_test') {
+        job.result = { ok: true }
+      } else if (kind === 'moodle_sync') {
         job.result = { ok: true, busy: false, new_files: 1, errors: 0, error: null, files: [{ course: 'LAPR3', name: 'Enunciado.pdf', kind: 'novo' }] }
         this.moodle.last_sync_date = iso(this.opts.now()).slice(0, 10)
         this.history.push({ id: `s${this.history.length}`, kind: 'moodle_sync', trigger: 'api', ok: true, started: job.started, finished: job.finished, duration_s: 3, error: null, summary: null, details: { new_files: 1, errors: 0, files: [{ course: 'LAPR3', name: 'Enunciado.pdf', kind: 'novo' }] } })

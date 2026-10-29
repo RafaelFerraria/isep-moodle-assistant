@@ -50,8 +50,11 @@ pub fn history_file() -> PathBuf {
 pub fn session_script() -> PathBuf {
     email_dir().join("session_sender.cjs")
 }
-pub fn digest_runner_bat() -> PathBuf {
-    email_dir().join("executar_notificador.bat")
+/// Programa e argumentos que o Agendador de Tarefas executa: este mesmo executável, com a raiz de dados fixada
+/// (a tarefa não herda o ambiente nem a pasta de trabalho da app).
+pub fn digest_command() -> (PathBuf, String) {
+    let exe = env::current_exe().unwrap_or_else(|_| PathBuf::from("isep-assistant-api.exe"));
+    (exe, format!("digest --root \"{}\"", root().display()))
 }
 
 fn or_default(dir: Option<&Path>) -> PathBuf {
@@ -65,6 +68,9 @@ pub fn sync_log(dir: Option<&Path>) -> PathBuf {
 }
 pub fn new_files_log(dir: Option<&Path>) -> PathBuf {
     or_default(dir).join("new_files.jsonl")
+}
+pub fn sync_progress(dir: Option<&Path>) -> PathBuf {
+    or_default(dir).join("sync_progress.json")
 }
 pub fn sync_lock(dir: Option<&Path>) -> PathBuf {
     or_default(dir).join("sync.lock")

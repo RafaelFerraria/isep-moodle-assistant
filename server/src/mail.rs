@@ -236,10 +236,59 @@ pub fn fetch_emails_thunderbird(since: NaiveDateTime, opts: FetchOptions) -> Res
     read_mbox(&inboxes[0], since).map_err(|e| format!("Não foi possível ler a caixa de entrada: {e}"))
 }
 
-/// Escolhe o método de leitura configurado. Só o Thunderbird está portado para Rust.
-pub fn get_emails(config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
-    match str_or(config, "email_method", "thunderbird").to_lowercase().as_str() {
-        "thunderbird" => fetch_emails_thunderbird(since, opts),
-        other => Err(format!("O método de email '{other}' ainda não está disponível na versão Rust (usa 'thunderbird').")),
+// ---------------------------------------------------------------- origens de email
+
+/// De onde vêm os emails. Cada origem é independente do resto da app: o resumo, a página de emails e a API só
+/// conhecem esta interface, por isso trocar o Thunderbird pelo serviço próprio (ou, na nuvem, por um serviço
+/// do servidor) não toca em mais nada.
+pub trait MailSource {
+    fn id(&self) -> &'static str;
+    /// Emails recebidos depois de `since`, mais recentes primeiro.
+    fn fetch(&self, config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String>;
+}
+
+pub struct ThunderbirdSource;
+impl MailSource for ThunderbirdSource {
+    fn id(&self) -> &'static str {
+        "thunderbird"
     }
+    fn fetch(&self, _config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
+        fetch_emails_thunderbird(since, opts)
+    }
+}
+
+/// Serviço próprio da app: Microsoft Graph com início de sessão por código de dispositivo.
+pub struct GraphSource;
+impl MailSource for GraphSource {
+    fn id(&self) -> &'static str {
+        "graph"
+    }
+    fn fetch(&self, config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
+        if opts.sync && !wait_for_internet(Duration::from_secs(30)) {
+            return Err("Sem ligação à Internet. A abortar sem avançar a data de última execução.".into());
+        }
+        let (emails, rotated) = crate::graph::fetch_inbox(config, since)?;
+        if let Some(token) = rotated {
+            // a Microsoft roda o token de renovação: grava o novo para a próxima execução
+            let mut fresh = crate::config::load_config();
+            if crate::graph::store_refresh_token(&mut fresh, &token).is_ok() {
+                let _ = crate::config::save_config(&fresh);
+            }
+        }
+        Ok(emails)
+    }
+}
+
+/// Nomes aceites em `email_method` (`outlook` é o nome antigo da versão Python para o mesmo serviço).
+pub fn source_for(method: &str) -> Result<Box<dyn MailSource>, String> {
+    match method.to_lowercase().as_str() {
+        "thunderbird" => Ok(Box::new(ThunderbirdSource)),
+        "graph" | "outlook" => Ok(Box::new(GraphSource)),
+        other => Err(format!("O método de email '{other}' ainda não está disponível na versão Rust (usa 'thunderbird' ou 'graph').")),
+    }
+}
+
+/// Escolhe o método de leitura configurado.
+pub fn get_emails(config: &Json, since: NaiveDateTime, opts: FetchOptions) -> Result<Vec<Email>, String> {
+    source_for(str_or(config, "email_method", "thunderbird"))?.fetch(config, since, opts)
 }

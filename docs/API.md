@@ -50,9 +50,28 @@ A UI deve ler este ficheiro, confirmar que o servidor responde em `/api/v1/healt
 | GET | `/moodle/new-files?limit=` | Ficheiros novos/atualizados no Moodle. |
 | GET | `/logs/{notifier\|sync}?lines=` | Fim dos ficheiros de log. |
 
+### Só no servidor Rust (páginas da app e configuração)
+
+| Método | Caminho | O que faz |
+|---|---|---|
+| GET | `/overview?days=7\|15\|30` | Resumo de hoje (`today`), o mais recente (`latest`), os resumos do período (`items`) e totais. |
+| GET | `/emails?days=&limit=` | Emails da origem configurada (`source`); se não estiver pronta, `error` explica porquê. |
+| GET | `/moodle/files?limit=` | Progresso da sincronização (`running`, `percent`, `counts`, `items` por estado) e ficheiros já descarregados. |
+| GET | `/activity?days=` | Histórico e logs dos últimos dias (máx. 7). |
+| GET | `/setup` | Passos do assistente de configuração e se está tudo pronto. |
+| GET | `/session` | Estado do Session: bot, destinatários, Node.js. A frase secreta nunca é devolvida. |
+| POST | `/session/bot` | Cria o bot do Session (`{force}` para trocar o existente). |
+| POST | `/session/pair` | **Tarefa**: espera a primeira mensagem ao bot e guarda quem a enviou como destinatário. |
+| POST | `/session/test` | **Tarefa**: envia uma mensagem de teste. |
+| POST, DELETE | `/session/recipients`, `/session/recipients/{índice}` | Adiciona (`{session_id}`) ou remove um destinatário. |
+| POST | `/email/connect/start` | Inicia a ligação da conta Microsoft (código de dispositivo). |
+| POST | `/email/connect/poll` | `{device_code}`: `pending`, `done` ou `failed`. Guarda o token cifrado quando termina. |
+
+As definições ganham `email.connected`, `setup.done` e os campos editáveis `email.method` (`thunderbird` ou `graph`), `email.address` e `setup.done`.
+
 ### Tarefas
 
-`POST` em `/digest/*` e `/moodle/sync` respondem `202` com `{id, status: "running", …}`. Fazer *polling* de `GET /jobs/{id}` até `status` ser `done` ou `failed`; `progress` traz as linhas de log (use `since_line` para receber só as novas) e `result` o resultado. Só corre **uma tarefa de cada vez**: outro pedido enquanto há uma ativa devolve `409` com `active_job_id`.
+`POST` em `/digest/*`, `/moodle/sync`, `/session/pair` e `/session/test` respondem `202` com `{id, status: "running", …}`. Fazer *polling* de `GET /jobs/{id}` até `status` ser `done` ou `failed`; `progress` traz as linhas de log (use `since_line` para receber só as novas) e `result` o resultado. Só corre **uma tarefa de cada vez**: outro pedido enquanto há uma ativa devolve `409` com `active_job_id`.
 
 ### Exemplo de definições
 

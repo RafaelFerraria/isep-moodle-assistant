@@ -1,11 +1,19 @@
 import type { Transport } from './transport'
 import type {
+  Activity,
+  DeviceLogin,
+  DevicePoll,
   DigestResult,
+  EmailsResult,
   HistoryKind,
   HistoryRecord,
   Job,
   LogName,
+  MoodleFiles,
   NewFile,
+  Overview,
+  SessionState,
+  SetupState,
   Settings,
   SettingsPatch,
   SettingsUpdateResult,
@@ -90,6 +98,22 @@ export class AssistantApi {
     return this.call<{ items: HistoryRecord[] }>('GET', `/history?${params}`)
   }
   historyItem = (id: string) => this.call<HistoryRecord>('GET', `/history/${encodeURIComponent(id)}`)
+  overview = (days = 7) => this.call<Overview>('GET', `/overview?days=${days}`)
+  emails = (days = 7, limit = 100) => this.call<EmailsResult>('GET', `/emails?days=${days}&limit=${limit}`)
+  moodleFiles = (limit = 100) => this.call<MoodleFiles>('GET', `/moodle/files?limit=${limit}`)
+  activity = (days = 7) => this.call<Activity>('GET', `/activity?days=${days}`)
+  setup = () => this.call<SetupState>('GET', '/setup')
+
+  session = () => this.call<SessionState>('GET', '/session')
+  createSessionBot = (force = false) => this.call<SessionState>('POST', '/session/bot', { force })
+  startSessionPair = () => this.call<Job<{ session_id: string }>>('POST', '/session/pair')
+  startSessionTest = () => this.call<Job<{ ok: boolean }>>('POST', '/session/test')
+  addSessionRecipient = (sessionId: string) => this.call<SessionState>('POST', '/session/recipients', { session_id: sessionId })
+  removeSessionRecipient = (index: number) => this.call<SessionState>('DELETE', `/session/recipients/${index}`)
+
+  startEmailConnect = () => this.call<DeviceLogin>('POST', '/email/connect/start')
+  pollEmailConnect = (deviceCode: string) => this.call<DevicePoll>('POST', '/email/connect/poll', { device_code: deviceCode })
+
   newFiles = (limit = 100) => this.call<{ items: NewFile[] }>('GET', `/moodle/new-files?limit=${limit}`)
   logs = (name: LogName, lines = 200) => this.call<{ name: string; lines: string[] }>('GET', `/logs/${name}?lines=${lines}`)
 }

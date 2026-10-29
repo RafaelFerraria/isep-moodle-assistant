@@ -139,7 +139,7 @@ fn missing_inbox_and_unsupported_method_give_clear_errors() {
 fn parse_tasks_json_accepts_list_and_single_object_and_hides_never() {
     let one = json!({"name": "T", "state": "Ready", "last_run": "1999-11-30T00:00:00", "next_run": "2026-10-27T18:00:00", "last_result": 0});
     let parsed = system::parse_tasks_json(&one.to_string());
-    assert_eq!(parsed, vec![json!({"name": "T", "state": "Ready", "last_run": null, "next_run": "2026-10-27T18:00:00", "last_result": 0})]);
+    assert_eq!(parsed, vec![json!({"name": "T", "state": "Ready", "last_run": null, "next_run": "2026-10-27T18:00:00", "last_result": 0, "target": null, "target_ok": null})]);
     assert_eq!(system::parse_tasks_json(&json!([one, one]).to_string()).len(), 2);
     assert!(system::parse_tasks_json("").is_empty());
     assert!(system::parse_tasks_json("lixo").is_empty());
@@ -147,9 +147,10 @@ fn parse_tasks_json_accepts_list_and_single_object_and_hides_never() {
 
 #[test]
 fn registration_script_has_time_runner_and_both_tasks() {
-    let s = system::registration_script("09:30", "C:\\app\\EmailNotifier\\executar_notificador.bat");
+    let s = system::registration_script("09:30", "C:\\app\\isep-assistant-api.exe", "digest --root \"C:\\dados\"");
     assert!(s.contains("-At \"09:30\""));
-    assert!(s.contains("C:\\app\\EmailNotifier\\executar_notificador.bat"));
+    assert!(s.contains("-Execute \"C:\\app\\isep-assistant-api.exe\""));
+    assert!(s.contains("digest --root"));
     assert!(s.contains("ISEP_Email_Session_Daily") && s.contains("ISEP_Email_Session_OnLogon"));
     assert!(s.contains("Power-Troubleshooter"));
 }

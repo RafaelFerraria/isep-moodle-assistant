@@ -20,7 +20,10 @@ Mesmo contrato HTTP, mesmos ficheiros de dados (`EmailNotifier/config.json`, `la
 | `digest.rs` | resumo diário: emails + Moodle → resumo → Session (histórico, `last_run.json`) |
 | `summarizer.rs` / `ai.rs` | resumo por regras / por IA (CLI com login ou token de API) |
 | `moodle_sync.rs` / `moodle_report.rs` | sincronizador do Moodle e análise dos ficheiros novos |
-| `mail.rs` | leitura da caixa do Thunderbird (mbox) |
+| `mail.rs` | origens de email (`MailSource`): Thunderbird (mbox) e serviço próprio |
+| `graph.rs` | serviço próprio de email: Microsoft Graph com código de dispositivo (OAuth2) |
+| `progress.rs` | progresso da sincronização do Moodle (`sync_progress.json`) |
+| `views.rs` | dados das páginas: resumo, emails, ficheiros do Moodle, logs de 7 dias |
 | `http.rs` | cliente HTTP sobre a **WinHTTP** do Windows (TLS e proxy do sistema, cookies) |
 | `config.rs`, `history.rs`, `session.rs`, `system.rs`, `dpapi.rs`, `paths.rs`, `util.rs` | o resto |
 

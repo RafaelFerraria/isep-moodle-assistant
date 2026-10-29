@@ -27593,6 +27593,42 @@ async function main() {
     console.log(JSON.stringify(out));
     process.exit(0);
   }
+  if (args.includes("--listen")) {
+    // Modo sem terminal (usado pela app): espera a primeira mensagem privada para o bot, devolve o Session ID de
+    // quem a enviou numa linha JSON e responde a confirmar. Uso: --listen --mnemonic <frase> [--timeout <segundos>]
+    await ready;
+    let phrase = null;
+    let timeoutSec = 300;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--mnemonic" && args[i + 1]) phrase = args[i + 1];
+      if (args[i] === "--timeout" && args[i + 1]) timeoutSec = Math.max(5, parseInt(args[i + 1], 10) || 300);
+    }
+    if (!phrase) {
+      console.log(JSON.stringify({ error: "mnemonic em falta" }));
+      process.exit(2);
+    }
+    const listener = new Session({ network: new BunNetwork() });
+    listener.setMnemonic(phrase, "Notificador ISEP");
+    listener.addPoller(new Poller({ interval: 2e3 }));
+    const giveUp = setTimeout(() => {
+      console.log(JSON.stringify({ timeout: true }));
+      process.exit(3);
+    }, timeoutSec * 1e3);
+    listener.on("message", async (msg) => {
+      if (msg.type !== "private") return;
+      clearTimeout(giveUp);
+      try {
+        await listener.sendMessage({
+          to: msg.from,
+          text: "\u{1F44B} Ola! Contacto estabelecido com o Notificador ISEP. A partir de agora vais receber aqui os resumos."
+        });
+      } catch (e) {
+      }
+      console.log(JSON.stringify({ sessionId: msg.from }));
+      setTimeout(() => process.exit(0), 500);
+    });
+    return;
+  }
   if (args.includes("--pair")) {
     await ready;
     let configPath = import_path.default.join(process.cwd(), "config.json");

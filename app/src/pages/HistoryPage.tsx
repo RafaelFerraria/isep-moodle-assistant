@@ -1,19 +1,18 @@
 import { CheckCircle2, FileText, RefreshCw, XCircle } from 'lucide-react'
 import { useState } from 'react'
-import type { HistoryKind, HistoryRecord, LogName } from '../api'
+import type { Activity, HistoryKind, HistoryRecord, LogName } from '../api'
 import { Badge, Button, Card, Notice, Pre, Select, Spinner } from '../components/ui'
 import { Field } from '../components/ui'
 import { cx } from '../components/ui'
-import { fmtBytes, fmtDateTime, fmtDuration, shortCourse, TRIGGER_LABEL } from '../lib/format'
+import { fmtDateTime, fmtDuration, shortCourse, TRIGGER_LABEL } from '../lib/format'
 import { useApp } from '../lib/context'
 import { useAsync } from '../lib/hooks'
 
-type Tab = HistoryKind | 'files' | 'logs'
+type Tab = HistoryKind | 'logs'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'digest', label: 'Resumos' },
   { id: 'moodle_sync', label: 'Sincronizações' },
-  { id: 'files', label: 'Ficheiros do Moodle' },
   { id: 'logs', label: 'Registos' },
 ]
 
@@ -101,16 +100,12 @@ function RecordDetail({ id }: { id: string }) {
   )
 }
 
-function RecordsTab({ kind }: { kind: HistoryKind }) {
-  const { api } = useApp()
-  const list = useAsync(() => api.history({ kind, limit: 50 }), [api, kind])
+function RecordsTab({ kind, items }: { kind: HistoryKind; items: HistoryRecord[] }) {
   const [selected, setSelected] = useState<string | null>(null)
-  if (list.loading && !list.data) return <div className="flex items-center gap-2 p-4 text-sm text-slate-500"><Spinner /> A carregar…</div>
-  if (!list.data) return <Notice tone="bad">{list.error?.message}</Notice>
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <RecordList items={list.data.items} selected={selected} onSelect={setSelected} />
+        <RecordList items={items.filter((r) => r.kind === kind)} selected={selected} onSelect={setSelected} />
       </Card>
       <Card title="Detalhe">
         {selected ? <RecordDetail id={selected} /> : <p className="text-sm text-slate-500">Escolhe uma execução para ver o detalhe.</p>}
@@ -119,53 +114,15 @@ function RecordsTab({ kind }: { kind: HistoryKind }) {
   )
 }
 
-function FilesTab() {
-  const { api } = useApp()
-  const files = useAsync(() => api.newFiles(100), [api])
-  if (files.loading && !files.data) return <div className="flex items-center gap-2 p-4 text-sm text-slate-500"><Spinner /> A carregar…</div>
-  if (!files.data) return <Notice tone="bad">{files.error?.message}</Notice>
-  if (files.data.items.length === 0) return <Card><p className="py-6 text-center text-sm text-slate-500">Sem ficheiros novos registados.</p></Card>
-  return (
-    <Card>
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs uppercase tracking-wide text-slate-500">
-          <tr>
-            <th className="py-2 pr-3 font-medium">Ficheiro</th>
-            <th className="py-2 pr-3 font-medium">Disciplina</th>
-            <th className="py-2 pr-3 font-medium">Quando</th>
-            <th className="py-2 font-medium">Tamanho</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-          {files.data.items.map((f) => (
-            <tr key={`${f.path}-${f.ts}`}>
-              <td className="py-2 pr-3">
-                <span className="flex items-center gap-2">
-                  <FileText className="size-4 text-slate-400" aria-hidden />
-                  {f.name}
-                  <Badge tone={f.kind === 'atualizado' ? 'warn' : 'good'}>{f.kind}</Badge>
-                </span>
-              </td>
-              <td className="py-2 pr-3 text-slate-600 dark:text-slate-400">{shortCourse(f.course)}</td>
-              <td className="py-2 pr-3 text-slate-600 dark:text-slate-400">{fmtDateTime(f.ts)}</td>
-              <td className="py-2 text-slate-600 dark:text-slate-400">{fmtBytes(f.size)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  )
-}
-
-function LogsTab() {
-  const { api } = useApp()
+function LogsTab({ logs, onRefresh }: { logs: Activity['logs']; onRefresh: () => void }) {
   const [name, setName] = useState<LogName>('notifier')
-  const logs = useAsync(() => api.logs(name, 300), [api, name])
+  const lines = logs[name]
   return (
     <Card
       title="Registos"
+      subtitle="Só se guardam os últimos 7 dias; o que é mais antigo é apagado automaticamente."
       action={
-        <Button variant="ghost" onClick={() => void logs.reload()} icon={<RefreshCw className="size-4" />}>
+        <Button variant="ghost" onClick={onRefresh} icon={<RefreshCw className="size-4" />}>
           Atualizar
         </Button>
       }
@@ -180,24 +137,20 @@ function LogsTab() {
           )}
         </Field>
       </div>
-      {logs.loading && !logs.data ? (
-        <Spinner />
-      ) : logs.data && logs.data.lines.length > 0 ? (
-        <Pre label="Registos">{logs.data.lines.join('\n')}</Pre>
-      ) : (
-        <p className="text-sm text-slate-500">Sem registos.</p>
-      )}
+      {lines.length > 0 ? <Pre label="Registos">{lines.join('\n')}</Pre> : <p className="text-sm text-slate-500">Sem registos.</p>}
     </Card>
   )
 }
 
 export function HistoryPage() {
+  const { api } = useApp()
+  const activity = useAsync<Activity>(() => api.activity(7), [api])
   const [tab, setTab] = useState<Tab>('digest')
   return (
     <div className="space-y-6 p-6 lg:p-8">
       <header>
         <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Histórico</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Tudo o que foi enviado e sincronizado.</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Os últimos 7 dias de resumos, sincronizações e registos, guardados neste PC.</p>
       </header>
       <div role="tablist" aria-label="Secções do histórico" className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800">
         {TABS.map((t) => (
@@ -217,9 +170,15 @@ export function HistoryPage() {
         ))}
       </div>
       <div role="tabpanel">
-        {(tab === 'digest' || tab === 'moodle_sync') && <RecordsTab key={tab} kind={tab} />}
-        {tab === 'files' && <FilesTab />}
-        {tab === 'logs' && <LogsTab />}
+        {activity.loading && !activity.data ? (
+          <div className="flex items-center gap-2 p-4 text-sm text-slate-500"><Spinner /> A carregar…</div>
+        ) : !activity.data ? (
+          <Notice tone="bad">{activity.error?.message}</Notice>
+        ) : tab === 'logs' ? (
+          <LogsTab logs={activity.data.logs} onRefresh={() => void activity.reload()} />
+        ) : (
+          <RecordsTab key={tab} kind={tab} items={activity.data.history} />
+        )}
       </div>
     </div>
   )

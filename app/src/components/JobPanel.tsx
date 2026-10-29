@@ -7,6 +7,8 @@ const LABELS: Record<string, string> = {
   digest_preview: 'Pré-visualização do resumo',
   digest: 'Envio do resumo',
   moodle_sync: 'Sincronização do Moodle',
+  session_pair: 'Ligar o Session',
+  session_test: 'Mensagem de teste para o Session',
 }
 
 function DigestOutcome({ kind, result, error }: { kind: string; result: DigestResult | null; error: string | null }) {
@@ -75,6 +77,10 @@ export function JobPanel({ runner }: { runner: JobRunner }) {
         {job && job.status === 'failed' && <Notice tone="bad">{job.error ?? 'A tarefa falhou.'}</Notice>}
         {job && job.status === 'done' && job.kind.startsWith('digest') && (
           <DigestOutcome kind={job.kind} result={job.result as DigestResult | null} error={job.error} />
+        )}
+        {job && job.status === 'done' && job.kind === 'session_pair' && <Notice tone="good">Session ligado: vais receber aqui os resumos.</Notice>}
+        {job && job.status === 'done' && job.kind === 'session_test' && (
+          (job.result as { ok?: boolean } | null)?.ok ? <Notice tone="good">Mensagem de teste enviada. Confirma no teu Session.</Notice> : <Notice tone="bad">O envio falhou; vê o progresso acima.</Notice>
         )}
         {job && job.status === 'done' && job.kind === 'moodle_sync' && <SyncOutcome result={job.result as SyncResult | null} error={job.error} />}
       </div>

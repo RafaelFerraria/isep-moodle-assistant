@@ -5,6 +5,7 @@ use crate::history;
 use crate::http::{decode_component, join_url, HttpClient, Response};
 use crate::model::NewFile;
 use crate::paths;
+use crate::progress::{Progress, State};
 use crate::util::{now_iso, read_json, str_of, write_json_atomic, Json};
 use chrono::Local;
 use regex::Regex;
@@ -142,6 +143,7 @@ pub struct MoodleSync {
     ctx_course: String,
     ctx_section: String,
     sink: Option<LogSink>,
+    pub progress: Progress,
 }
 
 impl MoodleSync {
@@ -160,6 +162,7 @@ impl MoodleSync {
             ctx_course: String::new(),
             ctx_section: String::new(),
             sink,
+            progress: Progress::new(sync_dir),
         })
     }
 
@@ -307,6 +310,23 @@ impl MoodleSync {
 
     /// Descarrega de forma incremental; só regista como novo se for novo ou tiver mudado.
     pub fn download_file(&mut self, url: &str, dest: &Path) -> bool {
+        let (course, section) = (self.ctx_course.clone(), self.ctx_section.clone());
+        let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.progress.update(dest, &course, &section, &name, State::Downloading, 0, None);
+        let new_before = self.new_files.len();
+        let ok = self.download_file_inner(url, dest);
+        if !ok {
+            self.progress.update(dest, &course, &section, &name, State::Error, 0, Some("falhou o download"));
+        } else if self.new_files.len() > new_before {
+            let (real, size) = self.new_files.last().map(|f| (f.name.clone(), f.size)).unwrap_or_default();
+            self.progress.update(dest, &course, &section, &real, State::Done, size, None);
+        } else {
+            self.progress.update(dest, &course, &section, &name, State::Unchanged, 0, None);
+        }
+        ok
+    }
+
+    fn download_file_inner(&mut self, url: &str, dest: &Path) -> bool {
         let resp = match self.client.get(url, &[]) {
             Ok(r) => r,
             Err(e) => {
@@ -459,9 +479,16 @@ impl MoodleSync {
             let with = |needle: &str| links.iter().filter(move |(h, _)| h.contains(needle)).cloned().collect::<Vec<_>>();
 
             // 1. recursos individuais (PDFs, docs, ficheiros)
-            for (href, label) in with("/mod/resource/view.php?id=").iter().filter(|(h, _)| RE_FOLDER_ID.is_match(h)) {
-                let label = if label.is_empty() { format!("recurso_{s_idx}") } else { label.clone() };
-                self.download_file(href, &sec_dir.join(sanitize_filename(&label)));
+            let resources: Vec<(String, String)> = with("/mod/resource/view.php?id=")
+                .into_iter()
+                .filter(|(h, _)| RE_FOLDER_ID.is_match(h))
+                .map(|(h, l)| (h, if l.is_empty() { format!("recurso_{s_idx}") } else { l }))
+                .collect();
+            for (_, label) in &resources {
+                self.progress.queue(&sec_dir.join(sanitize_filename(label)), course_name, &sec_name, label);
+            }
+            for (href, label) in &resources {
+                self.download_file(href, &sec_dir.join(sanitize_filename(label)));
             }
 
             // 2. pastas (descarrega o ZIP da pasta; senão raspa os ficheiros da página)
@@ -553,20 +580,27 @@ impl MoodleSync {
     }
 
     fn run_all_locked(&mut self) -> bool {
+        self.progress.start();
         if !self.login() {
             self.log("Falha ao iniciar sessão. A abortar sincronização.");
+            self.progress.finish();
             return false;
         }
         let courses = self.get_enrolled_courses();
         if courses.is_empty() {
             self.log("Nenhuma disciplina encontrada.");
+            self.progress.finish();
             return false;
         }
+        self.progress.set_courses(courses.len());
         self.log(&format!("Iniciando sincronização para {} disciplinas em '{}'...", courses.len(), self.download_dir.display()));
         for (id, name) in courses {
             // uma disciplina com erro não impede as restantes (os erros de rede contam-se em sync_course)
+            self.progress.begin_course(&name);
             self.sync_course(&id, &name);
+            self.progress.end_course();
         }
+        self.progress.finish();
         self.log(&format!("Sincronização terminada: {} ficheiros novos/atualizados, {} erros.", self.new_files.len(), self.errors));
         self.errors == 0
     }

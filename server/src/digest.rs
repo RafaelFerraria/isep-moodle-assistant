@@ -80,7 +80,7 @@ fn last_run_value(key: &str) -> Option<String> {
     read_json(&paths::last_run_file()).get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn sent_ids() -> Vec<String> {
+pub fn sent_ids() -> Vec<String> {
     read_json(&paths::last_run_file())
         .get("sent_ids")
         .and_then(Value::as_array)

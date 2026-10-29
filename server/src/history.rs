@@ -123,3 +123,29 @@ pub fn last(kind: &str, only_ok: bool) -> Option<Value> {
         .into_iter()
         .find(|r| !only_ok || r.get("ok").and_then(Value::as_bool).unwrap_or(false))
 }
+
+fn parse_ts(r: &Value, key: &str) -> Option<NaiveDateTime> {
+    r.get(key).and_then(Value::as_str).and_then(|t| NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%.f").ok())
+}
+
+/// Registos (mais recentes primeiro) começados depois de `since`. `include_summary` traz o texto completo dos resumos.
+pub fn list_since(since: NaiveDateTime, kind: Option<&str>, include_summary: bool) -> Vec<Value> {
+    list_records(MAX_RECORDS, 0, kind, include_summary)
+        .into_iter()
+        .filter(|r| parse_ts(r, "started").map(|t| t >= since).unwrap_or(false))
+        .collect()
+}
+
+/// Apaga os registos começados antes de `cutoff`. Devolve quantos apagou.
+pub fn prune_before(cutoff: NaiveDateTime) -> std::io::Result<usize> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let path = paths::history_file();
+    let records = read_all(&path);
+    let keep: Vec<&Value> = records.iter().filter(|r| parse_ts(r, "started").map(|t| t >= cutoff).unwrap_or(true)).collect();
+    let removed = records.len() - keep.len();
+    if removed > 0 {
+        let body: String = keep.iter().map(|r| format!("{r}\n")).collect();
+        std::fs::write(&path, body)?;
+    }
+    Ok(removed)
+}

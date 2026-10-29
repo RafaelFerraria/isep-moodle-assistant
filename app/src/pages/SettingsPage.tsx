@@ -1,8 +1,11 @@
-import { Bot, Cpu, KeyRound, Save, Shield, TestTube2, Undo2 } from 'lucide-react'
+import { Bell, Bot, CheckCircle2, CircleDashed, Cpu, KeyRound, Mail, Save, Shield, TestTube2, Undo2, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError } from '../api'
-import type { AiApiType, AiCli, AiProvider, Settings, SettingsPatch, SettingsUpdateResult, SummaryMode, SummaryTestResult } from '../api'
-import { Button, Card, Choice, Field, Notice, Pre, Select, Spinner, TextInput } from '../components/ui'
+import type { AiApiType, AiCli, AiProvider, Check, EmailMethod, Settings, SettingsPatch, SettingsUpdateResult, SummaryMode, SummaryTestResult } from '../api'
+import { EmailConnect } from '../components/EmailConnect'
+import { MoodleCredentials } from '../components/MoodleCredentials'
+import { Badge, Button, Card, Choice, Field, Notice, Pre, Select, Spinner, TextInput } from '../components/ui'
 import { useApp } from '../lib/context'
 import { useAsync } from '../lib/hooks'
 
@@ -19,6 +22,8 @@ export interface Draft {
   newApiKey: string
   clearApiKey: boolean
   time: string
+  emailMethod: EmailMethod
+  emailAddress: string
   sessionId: string
   downloadDir: string
   syncDir: string
@@ -37,6 +42,8 @@ export function toDraft(s: Settings): Draft {
     newApiKey: '',
     clearApiKey: false,
     time: s.schedule.time,
+    emailMethod: s.email.method,
+    emailAddress: s.email.address,
     sessionId: '',
     downloadDir: s.moodle.download_dir,
     syncDir: s.moodle.sync_dir,
@@ -59,6 +66,10 @@ export function buildPatch(s: Settings, d: Draft): SettingsPatch {
   else if (d.clearApiKey) summary.clear_ai_api_key = true
   if (Object.keys(summary).length) patch.summary = summary
   if (d.time !== cur.time) patch.schedule = { time: d.time }
+  const email: NonNullable<SettingsPatch['email']> = {}
+  if (d.emailMethod !== cur.emailMethod) email.method = d.emailMethod
+  if (d.emailAddress.trim() !== cur.emailAddress) email.address = d.emailAddress.trim()
+  if (Object.keys(email).length) patch.email = email
   if (d.sessionId.trim()) patch.destination = { session_id: d.sessionId.trim() }
   const moodle: NonNullable<SettingsPatch['moodle']> = {}
   if (d.downloadDir !== cur.downloadDir) moodle.download_dir = d.downloadDir
@@ -211,39 +222,90 @@ function TestSection({ dirty, mode }: { dirty: boolean; mode: SummaryMode }) {
   )
 }
 
-function MoodleCredentials({ username, onSaved }: { username: string; onSaved: () => void }) {
-  const { api } = useApp()
-  const [user, setUser] = useState(username)
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null)
-  useEffect(() => setUser(username), [username])
-  const save = async () => {
-    setBusy(true)
-    setMessage(null)
-    try {
-      const r = await api.setMoodleCredentials(user.trim(), password)
-      setPassword('')
-      setMessage({ tone: 'good', text: `Credenciais validadas e guardadas (${r.username}).` })
-      onSaved()
-    } catch (e) {
-      setMessage({ tone: 'bad', text: e instanceof ApiError ? e.message : String(e) })
-    } finally {
-      setBusy(false)
-    }
-  }
+function EmailSection({ s, d, set, errors, onConnected }: { s: Settings; d: Draft; set: (p: Partial<Draft>) => void; errors: Record<string, string>; onConnected: () => void }) {
   return (
-    <Card title="Conta do Moodle" subtitle="A palavra-passe é validada no Moodle e guardada cifrada com o Windows (DPAPI). Nunca é mostrada.">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Número mecanográfico">{(p) => <TextInput {...p} value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" />}</Field>
-        <Field label="Palavra-passe do Moodle">{(p) => <TextInput {...p} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />}</Field>
+    <Card title="Emails" subtitle="De onde a app lê os emails do ISEP. Só lê; nunca apaga nem envia.">
+      <div className="space-y-5">
+        <Choice<EmailMethod>
+          legend="Origem dos emails"
+          value={d.emailMethod}
+          onChange={(emailMethod) => set({ emailMethod })}
+          options={[
+            { value: 'graph', title: 'Conta do ISEP (serviço da app)', description: 'Liga-se diretamente à tua conta Microsoft. Não precisa do Thunderbird.', icon: <Mail className="size-5" /> },
+            { value: 'thunderbird', title: 'Thunderbird', description: 'Lê a caixa de entrada do Thunderbird neste PC.', icon: <Mail className="size-5" /> },
+          ]}
+        />
+        {errors['email.method'] && <p role="alert" className="text-xs text-rose-600">{errors['email.method']}</p>}
+        {d.emailMethod === 'graph' &&
+          (s.email.method === 'graph' ? (
+            <EmailConnect connected={s.email.connected} onConnected={onConnected} />
+          ) : (
+            <p className="text-xs text-slate-500">Guarda as alterações para poderes ligar a conta.</p>
+          ))}
+        <div className="max-w-md">
+          <Field label="O teu email do ISEP" error={errors['email.address']}>
+            {(p) => <TextInput {...p} type="email" value={d.emailAddress} onChange={(e) => set({ emailAddress: e.target.value })} placeholder="numero@isep.ipp.pt" />}
+          </Field>
+        </div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <Button onClick={() => void save()} loading={busy} disabled={!user.trim() || !password}>
-          Validar e guardar
-        </Button>
-        {message && <Notice tone={message.tone}>{message.text}</Notice>}
-      </div>
+    </Card>
+  )
+}
+
+function NotificationsSection({ s }: { s: Settings }) {
+  const soon = ['Email', 'SMS', 'WhatsApp']
+  return (
+    <Card title="Notificações" subtitle="Por onde recebes o resumo.">
+      <ul aria-label="Canais de notificação" className="divide-y divide-slate-100 dark:divide-slate-800">
+        <li className="flex items-center gap-3 py-3">
+          <Bell className="size-5 text-brand-600" aria-hidden />
+          <span className="flex-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+            Session
+            <span className="block text-xs font-normal text-slate-500">
+              {s.destination.session_configured ? `A enviar para ${s.destination.session_recipients.join(', ')}.` : 'Ainda não está configurado.'}{' '}
+              <Link to="/session" className="font-medium text-brand-600 hover:underline dark:text-indigo-400">
+                Configurar
+              </Link>
+            </span>
+          </span>
+          <Badge tone={s.destination.session_configured ? 'good' : 'warn'}>{s.destination.session_configured ? 'Ativo' : 'Por configurar'}</Badge>
+        </li>
+        {soon.map((name) => (
+          <li key={name} className="flex items-center gap-3 py-3 opacity-70">
+            <Bell className="size-5 text-slate-400" aria-hidden />
+            <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+              {name}
+              <span className="block text-xs font-normal text-slate-500">Previsto para a versão com servidor.</span>
+            </span>
+            <Badge>Em breve</Badge>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function ChecksSection({ checks }: { checks: Check[] }) {
+  return (
+    <Card title="Verificações" subtitle="O que é preciso para o resumo correr sozinho.">
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {checks.map((c) => {
+          const Icon = c.ok ? CheckCircle2 : c.required ? XCircle : CircleDashed
+          const color = c.ok ? 'text-emerald-600' : c.required ? 'text-rose-600' : 'text-slate-400'
+          return (
+            <li key={c.id} className="flex items-start gap-3 py-2">
+              <Icon className={`mt-0.5 size-5 shrink-0 ${color}`} aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-slate-800 dark:text-slate-200">
+                  {c.label}
+                  <span className="sr-only">{c.ok ? ': ok' : c.required ? ': com problema' : ': opcional, não configurado'}</span>
+                </p>
+                {c.detail && <p className="text-xs text-slate-500 dark:text-slate-400">{c.detail}</p>}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
     </Card>
   )
 }
@@ -298,7 +360,7 @@ export function SettingsPage() {
     }
   }
 
-  const shown = new Set(['summary.mode', 'summary.ai_cli', 'summary.ai_cli_command', 'summary.ai_api_type', 'summary.ai_model', 'summary.ai_base_url', 'summary.ai_api_key', 'schedule.time', 'destination.session_id', 'moodle.sync_dir', 'moodle.download_dir'])
+  const shown = new Set(['summary.mode', 'summary.ai_cli', 'summary.ai_cli_command', 'summary.ai_api_type', 'summary.ai_model', 'summary.ai_base_url', 'summary.ai_api_key', 'schedule.time', 'destination.session_id', 'moodle.sync_dir', 'moodle.download_dir', 'email.method', 'email.address'])
   const orphan = Object.entries(errors).filter(([k]) => !shown.has(k) || (draft.mode === 'rules' && k.startsWith('summary.ai')))
 
   return (
@@ -308,6 +370,7 @@ export function SettingsPage() {
         <p className="text-sm text-slate-500 dark:text-slate-400">As alterações só se aplicam depois de carregares em «Guardar».</p>
       </header>
 
+      <EmailSection s={s} d={draft} set={set} errors={errors} onConnected={() => { void settings.reload(); void status.reload() }} />
       <SummarySection s={s} d={draft} set={set} errors={errors} />
       <TestSection dirty={dirty} mode={s.summary.mode} />
 
@@ -318,6 +381,8 @@ export function SettingsPage() {
           </Field>
         </div>
       </Card>
+
+      <NotificationsSection s={s} />
 
       <Card title="Destino" subtitle="Onde recebes o resumo (Session).">
         <div className="space-y-3">
@@ -335,6 +400,8 @@ export function SettingsPage() {
       </Card>
 
       <MoodleCredentials username={status.data?.moodle.username ?? ''} onSaved={() => void status.reload()} />
+
+      {status.data && <ChecksSection checks={status.data.checks} />}
 
       <Card title="Pastas" subtitle="Avançado.">
         <div className="grid gap-4 sm:grid-cols-2">

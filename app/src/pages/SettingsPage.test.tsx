@@ -157,7 +157,7 @@ describe('SettingsPage', () => {
     await user.type(field, SID)
     await user.click(screen.getByRole('button', { name: /Guardar alterações/ }))
     await screen.findByText(/Definições guardadas/)
-    expect(screen.getByText('05abab…abab', { exact: false })).toBeInTheDocument()
+    expect(screen.getAllByText('05abab…abab', { exact: false }).length).toBeGreaterThan(0)
     expect(screen.getByLabelText('Novo Session ID')).toHaveValue('')
     expect(document.body.textContent).not.toContain(SID)
   })

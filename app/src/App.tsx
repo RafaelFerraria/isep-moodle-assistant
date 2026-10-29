@@ -1,4 +1,4 @@
-import { Activity, History, RefreshCw, Settings as SettingsIcon, WifiOff } from 'lucide-react'
+import { FolderDown, History, Home, Mail, MessageCircle, RefreshCw, Settings as SettingsIcon, WifiOff } from 'lucide-react'
 import { HashRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { isDemoMode } from './api'
@@ -6,13 +6,20 @@ import type { AssistantApi } from './api'
 import { Button, Notice, Spinner, cx } from './components/ui'
 import { AppContext } from './lib/context'
 import { useAsync } from './lib/hooks'
+import { EmailsPage } from './pages/EmailsPage'
 import { HistoryPage } from './pages/HistoryPage'
+import { HomePage } from './pages/HomePage'
+import { MoodlePage } from './pages/MoodlePage'
+import { SessionPage } from './pages/SessionPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { StatusPage } from './pages/StatusPage'
+import { SetupWizard } from './pages/SetupWizard'
 import { useApp } from './lib/context'
 
 const NAV = [
-  { to: '/', label: 'Estado', icon: Activity, end: true },
+  { to: '/', label: 'Resumo', icon: Home, end: true },
+  { to: '/emails', label: 'Emails', icon: Mail, end: false },
+  { to: '/moodle', label: 'Moodle', icon: FolderDown, end: false },
+  { to: '/session', label: 'Session', icon: MessageCircle, end: false },
   { to: '/historico', label: 'Histórico', icon: History, end: false },
   { to: '/definicoes', label: 'Definições', icon: SettingsIcon, end: false },
 ]
@@ -51,6 +58,24 @@ function Sidebar({ version, demo }: { version: string; demo: boolean }) {
       </nav>
     </aside>
   )
+}
+
+/** Na primeira vez (configuração por concluir) mostra o assistente em vez da app. */
+function SetupGate({ children }: { children: ReactNode }) {
+  const { api } = useApp()
+  const settings = useAsync(() => api.settings(), [api])
+  if (settings.loading && !settings.data) {
+    return (
+      <div className="grid h-full place-items-center" role="status">
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Spinner /> A carregar…
+        </div>
+      </div>
+    )
+  }
+  // se as definições falharem, deixa entrar: cada página mostra o seu próprio erro
+  if (settings.data && !settings.data.setup.done) return <SetupWizard onDone={() => void settings.reload()} />
+  return <>{children}</>
 }
 
 /** Só mostra a app quando o servidor local responde; senão explica e deixa tentar de novo. */
@@ -92,17 +117,22 @@ export default function App({ api, pollMs = 1000 }: { api: AssistantApi; pollMs?
       <HashRouter>
         <ConnectionGate>
           {(version) => (
-            <div className="min-h-full lg:pl-64">
-              <Sidebar version={version} demo={demo} />
-              <main>
-                <Routes>
-                  <Route path="/" element={<StatusPage />} />
-                  <Route path="/historico" element={<HistoryPage />} />
-                  <Route path="/definicoes" element={<SettingsPage />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </main>
-            </div>
+            <SetupGate>
+              <div className="min-h-full lg:pl-64">
+                <Sidebar version={version} demo={demo} />
+                <main>
+                  <Routes>
+                    <Route path="/" element={<HomePage />} />
+                    <Route path="/emails" element={<EmailsPage />} />
+                    <Route path="/moodle" element={<MoodlePage />} />
+                    <Route path="/session" element={<SessionPage />} />
+                    <Route path="/historico" element={<HistoryPage />} />
+                    <Route path="/definicoes" element={<SettingsPage />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </main>
+              </div>
+            </SetupGate>
           )}
         </ConnectionGate>
       </HashRouter>

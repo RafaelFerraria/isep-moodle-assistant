@@ -56,6 +56,9 @@ pub fn parse_tasks_json(text: &str) -> Vec<Value> {
                 "name": t.get("name"), "state": t.get("state"),
                 "last_run": clean(&t["last_run"]), "next_run": clean(&t["next_run"]),
                 "last_result": t.get("last_result"),
+                // programa que a tarefa executa e se ainda existe (uma tarefa a apontar para um ficheiro em falta nunca corre)
+                "target": t.get("target").cloned().unwrap_or(Value::Null),
+                "target_ok": t.get("target_ok").cloned().unwrap_or(Value::Null),
             })
         })
         .collect()
@@ -72,7 +75,7 @@ pub static FAKE_REGISTRATIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex:
 /// Estado das tarefas agendadas (vazio fora do Windows ou se não existirem).
 pub fn query_tasks() -> Vec<Value> {
     if fake_scheduler() {
-        return vec![json!({"name": TASK_NAMES[0], "state": "Ready", "last_run": "2026-10-26T18:00:00", "next_run": "2026-10-27T18:00:00", "last_result": 0})];
+        return vec![json!({"name": TASK_NAMES[0], "state": "Ready", "last_run": "2026-10-26T18:00:00", "next_run": "2026-10-27T18:00:00", "last_result": 0, "target": null, "target_ok": true})];
     }
     if !IS_WINDOWS {
         return vec![];
@@ -81,8 +84,10 @@ pub fn query_tasks() -> Vec<Value> {
     let ps = format!(
         "$r=@(); foreach($n in @({quoted})){{ $t=Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue; \
          if($t){{ $i=$t | Get-ScheduledTaskInfo; \
+         $x=[Environment]::ExpandEnvironmentVariables([string]$t.Actions[0].Execute).Trim('\"'); \
          $r += [pscustomobject]@{{name=$n; state=[string]$t.State; \
-         last_run=$i.LastRunTime.ToString('s'); next_run=$i.NextRunTime.ToString('s'); last_result=[int64]$i.LastTaskResult}} }} }}; \
+         last_run=$i.LastRunTime.ToString('s'); next_run=$i.NextRunTime.ToString('s'); last_result=[int64]$i.LastTaskResult; \
+         target=$x; target_ok=[bool]($x -and (Test-Path -LiteralPath $x))}} }} }}; \
          if($r.Count -gt 0){{ $r | ConvertTo-Json -Compress }}"
     );
     let mut cmd = Command::new("powershell");
@@ -94,11 +99,11 @@ pub fn query_tasks() -> Vec<Value> {
 }
 
 /// Script PowerShell que (re)cria as tarefas diária (hora + retoma da suspensão) e ao iniciar sessão.
-pub fn registration_script(scheduled_time: &str, runner: &str) -> String {
+pub fn registration_script(scheduled_time: &str, exe: &str, args: &str) -> String {
     format!(
         r#"
     $ErrorActionPreference = 'Stop'
-    $workDir = Split-Path "{runner}"
+    $workDir = Split-Path "{exe}"
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
 
     # O PC costuma estar em suspensao a hora agendada (WakeToRun nao o acorda), por isso
@@ -109,13 +114,13 @@ pub fn registration_script(scheduled_time: &str, runner: &str) -> String {
     $triggerResume.Enabled = $true
     $triggerResume.Delay = 'PT1M'
     $triggerResume.Subscription = '<QueryList><Query Id="0" Path="System"><Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'
-    $actionDaily = New-ScheduledTaskAction -Execute "{runner}" -WorkingDirectory $workDir
+    $actionDaily = New-ScheduledTaskAction -Execute "{exe}" -Argument '{args}' -WorkingDirectory $workDir
     $settingsDaily = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -WakeToRun -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
     Register-ScheduledTask -TaskName "{daily}" -Trigger @($triggerDaily, $triggerResume) -Action $actionDaily -Settings $settingsDaily -Principal $principal -Force
 
     $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     $triggerLogon.Delay = 'PT1M'
-    $actionLogon = New-ScheduledTaskAction -Execute "{runner}" -WorkingDirectory $workDir
+    $actionLogon = New-ScheduledTaskAction -Execute "{exe}" -Argument '{args}' -WorkingDirectory $workDir
     $settingsLogon = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
     Register-ScheduledTask -TaskName "{logon}" -Trigger $triggerLogon -Action $actionLogon -Settings $settingsLogon -Principal $principal -Force
     "#,
@@ -133,8 +138,11 @@ pub fn register_tasks(scheduled_time: &str) -> (bool, String) {
     if !IS_WINDOWS {
         return (false, "O Agendador de Tarefas só existe no Windows.".into());
     }
-    let runner = paths::digest_runner_bat();
-    let script = registration_script(scheduled_time, &runner.to_string_lossy());
+    let (exe, args) = paths::digest_command();
+    if !exe.exists() {
+        return (false, format!("O programa do resumo não existe: {}", exe.display()));
+    }
+    let script = registration_script(scheduled_time, &exe.to_string_lossy(), &args);
     let mut cmd = Command::new("powershell");
     cmd.args(["-NoProfile", "-Command", &script]);
     match run_with_timeout(cmd, None, Duration::from_secs(60)) {

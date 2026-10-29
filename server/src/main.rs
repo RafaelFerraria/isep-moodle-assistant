@@ -2,6 +2,7 @@
 //!
 //!   isep-assistant-api serve [--port N]     API local (a interface gráfica liga-se aqui)
 //!   isep-assistant-api digest [--preview]   resumo diário (chamado pelo Agendador de Tarefas)
+//!   --root <pasta>                          raiz de dados (opcional, em qualquer comando)
 //!   isep-assistant-api sync                 sincroniza o Moodle agora
 //!   isep-assistant-api version
 use isep_assistant::api::{security, ApiServer, App};
@@ -25,6 +26,7 @@ fn serve(args: &[String]) -> i32 {
             _ => return usage(),
         }
     }
+    let _ = isep_assistant::views::prune();
     let token = security::new_token();
     let server = match ApiServer::bind(port, App::new(&token)) {
         Ok(s) => s,
@@ -46,13 +48,30 @@ fn serve(args: &[String]) -> i32 {
     0
 }
 
+/// `--root <pasta>` (em qualquer posição) fixa a raiz de dados: é o que as tarefas agendadas passam.
+fn take_root(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--root" {
+            if let Some(dir) = it.next() {
+                std::env::set_var("ISEP_ASSISTANT_ROOT", dir);
+            }
+        } else {
+            out.push(a);
+        }
+    }
+    out
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = take_root(std::env::args().skip(1).collect());
     let code = match args.first().map(String::as_str) {
         Some("serve") => serve(&args[1..]),
         Some("digest") => {
             let preview = args.iter().any(|a| a == "--preview");
             let res = run_digest(!preview, "scheduled", None, None, &Deps::default(), true);
+            let _ = isep_assistant::views::prune();
             i32::from(!res.ok)
         }
         Some("sync") => {

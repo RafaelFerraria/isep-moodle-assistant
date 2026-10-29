@@ -143,7 +143,8 @@ def test_status_shape_and_content(server):
 def test_settings_shape_masking_and_roundtrip(server):
     code, s, _ = get(server, "/settings")
     assert code == 200
-    assert set(s) == {"summary", "schedule", "destination", "email", "moodle"}
+    # «setup» (assistente de configuração) só existe no servidor Rust: o Python é a versão anterior e não o ganha
+    assert set(s) - {"setup"} == {"summary", "schedule", "destination", "email", "moodle"}
     assert set(s["summary"]) == {"mode", "ai_provider", "ai_cli", "ai_cli_command", "ai_api_type", "ai_model", "ai_base_url",
                                  "ai_api_key_set", "ai_api_key_env", "ai_api_key_env_set"}
     assert s["destination"]["session_configured"] is True

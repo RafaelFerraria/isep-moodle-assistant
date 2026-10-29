@@ -75,7 +75,7 @@ pub fn get_status(active_job: Value) -> Value {
     let thunderbird = system::find_thunderbird_path();
 
     let checks = vec![
-        check("config", "Configuração criada", !config.is_empty(), if config.is_empty() { "Corre o CONFIGURAR_TUDO.bat." } else { "" }, true),
+        check("config", "Configuração criada", !config.is_empty(), if config.is_empty() { "Abre o assistente de configuração." } else { "" }, true),
         check("session", "Destino Session configurado", settings["destination"]["session_configured"].as_bool().unwrap_or(false), "", true),
         check("thunderbird", "Thunderbird instalado", thunderbird.is_some(),
             if thunderbird.is_some() { "" } else { "Necessário para ler os emails do ISEP." },
@@ -83,8 +83,14 @@ pub fn get_status(active_job: Value) -> Value {
         check("node", "Node.js instalado", system::node_path().is_some(), "Necessário para enviar para o Session.", true),
         check("moodle", "Credenciais do Moodle", mood["configured"].as_bool().unwrap_or(false),
             if mood["configured"].as_bool().unwrap_or(false) { "" } else { "Define o utilizador e a palavra-passe do Moodle." }, false),
-        check("tasks", "Tarefas agendadas no Windows", !tasks.is_empty(),
-            &if tasks.is_empty() { "Sem tarefas: o resumo não corre sozinho.".to_string() } else { format!("{} tarefa(s) registada(s).", tasks.len()) },
+        check("tasks", "Tarefas agendadas no Windows", !tasks.is_empty() && !tasks_broken(&tasks),
+            &if tasks.is_empty() {
+                "Sem tarefas: o resumo não corre sozinho.".to_string()
+            } else if tasks_broken(&tasks) {
+                "Uma tarefa aponta para um programa que já não existe: volta a registar o agendamento.".to_string()
+            } else {
+                format!("{} tarefa(s) registada(s).", tasks.len())
+            },
             system::IS_WINDOWS),
         check("internet", "Ligação ao Moodle", system::internet_ok("moodle.isep.ipp.pt"), "", true),
         ai_ready(&config),
@@ -104,6 +110,41 @@ pub fn get_status(active_job: Value) -> Value {
         },
         "moodle": merge(&mood, json!({"last": history::last("moodle_sync", false)})),
         "tasks": tasks,
+        "active_job": active_job,
+    })
+}
+
+/// Alguma tarefa aponta para um ficheiro que não existe? (nunca correria)
+fn tasks_broken(tasks: &[Value]) -> bool {
+    tasks.iter().any(|t| t["target_ok"].as_bool() == Some(false))
+}
+
+/// Estado do assistente de configuração: o que já está feito e o que falta.
+pub fn get_setup(active_job: Value) -> Value {
+    let config = config::load_config();
+    let settings = config::public_settings(&config);
+    let tasks = system::query_tasks();
+    let mood = moodle_state(&config);
+    let method = str_or(&config, "email_method", "thunderbird").to_string();
+    let (email_ok, email_detail) = match method.as_str() {
+        "graph" => (crate::graph::is_connected(&config), "Conta Microsoft do ISEP ligada.".to_string()),
+        _ => (system::find_thunderbird_path().is_some(), "Thunderbird instalado com a conta do ISEP.".to_string()),
+    };
+    let session = crate::session::state(&config);
+    let session_ok = session["configured"].as_bool().unwrap_or(false) && session["node_ok"].as_bool().unwrap_or(false);
+    let schedule_ok = !tasks.is_empty() && !tasks_broken(&tasks);
+    let steps = vec![
+        check("email", "Emails", email_ok, &email_detail, true),
+        check("moodle", "Moodle", mood["configured"].as_bool().unwrap_or(false), "Número e palavra-passe do Moodle.", false),
+        check("session", "Session", session_ok, "Bot criado e o teu Session associado.", true),
+        check("summary", "Tipo de resumo", true, &describe(&config), false),
+        check("schedule", "Agendamento", schedule_ok, "O resumo corre sozinho à hora definida.", true),
+    ];
+    json!({
+        "done": settings["setup"]["done"],
+        "email_method": method,
+        "steps": steps,
+        "ready": steps.iter().all(|c| c["ok"].as_bool().unwrap_or(false) || !c["required"].as_bool().unwrap_or(true)),
         "active_job": active_job,
     })
 }
