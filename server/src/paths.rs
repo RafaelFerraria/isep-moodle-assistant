@@ -47,7 +47,23 @@ pub fn notifier_log() -> PathBuf {
 pub fn history_file() -> PathBuf {
     email_dir().join("history.jsonl")
 }
+/// Pasta `resources` da app instalada (o servidor está em `resources/bin/`). Só existe na app empacotada.
+pub fn embedded_resources() -> Option<PathBuf> {
+    let dir = env::current_exe().ok()?.parent()?.parent()?.to_path_buf();
+    (dir.join("session").is_dir() && dir.join("bin").is_dir()).then_some(dir)
+}
+
+/// O `session_sender.cjs`: `ISEP_SESSION_SCRIPT` (testes), o que vem dentro da app ou, em desenvolvimento, o da pasta de dados.
 pub fn session_script() -> PathBuf {
+    if let Some(v) = env::var_os("ISEP_SESSION_SCRIPT") {
+        return PathBuf::from(v);
+    }
+    if let Some(res) = embedded_resources() {
+        let inside = res.join("session").join("session_sender.cjs");
+        if inside.exists() {
+            return inside;
+        }
+    }
     email_dir().join("session_sender.cjs")
 }
 /// Programa e argumentos que o Agendador de Tarefas executa: este mesmo executável, com a raiz de dados fixada

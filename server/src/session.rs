@@ -1,8 +1,8 @@
 //! Envio de mensagens para o Session (via session_sender.cjs, Node.js).
 use crate::config::recipients_of;
 use crate::paths;
-use crate::util::{run_with_timeout, str_of, which, Json};
-use std::process::Command;
+use crate::system::{node_runtime, NodeRuntime};
+use crate::util::{run_with_timeout, str_of, Json};
 use std::time::Duration;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(120);
@@ -15,8 +15,8 @@ pub fn send_to_session(text: &str, config: &Json, log: &dyn Fn(&str)) -> bool {
         log("ERRO: Nenhum destinatário ou session_mnemonic não configurados no config.json!");
         return false;
     }
-    let Some(node) = which("node") else {
-        log("ERRO: Node.js não encontrado no PATH (necessário para enviar para o Session).");
+    let Some(node) = node_runtime() else {
+        log("ERRO: não foi encontrado o runtime do Session (Node.js).");
         return false;
     };
 
@@ -32,7 +32,7 @@ pub fn send_to_session(text: &str, config: &Json, log: &dyn Fn(&str)) -> bool {
     for target in &recipients {
         let short: String = target.chars().take(10).collect();
         log(&format!("A enviar resumo para o Session (Destino: {short}...)..."));
-        let mut cmd = Command::new(&node);
+        let mut cmd = node.command();
         cmd.arg(paths::session_script())
             .args(["--to", target, "--file"])
             .arg(&temp)
@@ -65,7 +65,7 @@ use serde_json::{json, Value};
 pub fn state(config: &Json) -> Value {
     let recipients = recipients_of(config);
     json!({
-        "node_ok": which("node").is_some(),
+        "node_ok": node_runtime().is_some(),
         "script_ok": paths::session_script().exists(),
         "bot_created": !str_of(config, "session_mnemonic").is_empty(),
         "bot_id": str_of(config, "session_bot_id"),
@@ -74,8 +74,8 @@ pub fn state(config: &Json) -> Value {
     })
 }
 
-fn require_sender() -> Result<std::path::PathBuf, String> {
-    let node = which("node").ok_or("O Node.js não está instalado (necessário para o Session). Instala-o em nodejs.org.")?;
+fn require_sender() -> Result<NodeRuntime, String> {
+    let node = node_runtime().ok_or("Não foi encontrado o Node.js (necessário para o Session). Instala-o em nodejs.org ou reinstala a app.")?;
     if !paths::session_script().exists() {
         return Err("O ficheiro session_sender.cjs não foi encontrado.".into());
     }
@@ -89,7 +89,7 @@ pub fn create_bot(force: bool) -> Result<Value, String> {
         return Ok(state(&config));
     }
     let node = require_sender()?;
-    let mut cmd = Command::new(node);
+    let mut cmd = node.command();
     cmd.arg(paths::session_script()).arg("--generate");
     let out = run_with_timeout(cmd, None, Duration::from_secs(60)).map_err(|e| format!("não foi possível correr o Node.js: {e}"))?;
     if out.timed_out || out.status != Some(0) {
@@ -117,7 +117,7 @@ pub fn pair(timeout: Duration, log: &dyn Fn(&str)) -> Result<Value, String> {
     }
     let node = require_sender()?;
     log(&format!("À espera da tua mensagem para o bot ({}).", now_iso()));
-    let mut cmd = Command::new(node);
+    let mut cmd = node.command();
     cmd.arg(paths::session_script()).args(["--listen", "--mnemonic", &mnemonic, "--timeout", &timeout.as_secs().to_string()]);
     let out = run_with_timeout(cmd, None, timeout + Duration::from_secs(30)).map_err(|e| format!("não foi possível correr o Node.js: {e}"))?;
     let reply: Value = serde_json::from_str(out.stdout.trim().lines().last().unwrap_or("")).unwrap_or(Value::Null);

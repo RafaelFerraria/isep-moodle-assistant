@@ -22,8 +22,41 @@ pub fn find_thunderbird_path() -> Option<PathBuf> {
     candidates.into_iter().find(|c| c.exists())
 }
 
+/// O «Node» que corre o `session_sender.cjs`.
+pub struct NodeRuntime {
+    pub exe: PathBuf,
+    /// É o executável da própria app (Electron) a fazer de Node: precisa de `ELECTRON_RUN_AS_NODE=1`.
+    pub electron: bool,
+}
+
+impl NodeRuntime {
+    pub fn command(&self) -> Command {
+        let mut cmd = Command::new(&self.exe);
+        if self.electron {
+            cmd.env("ELECTRON_RUN_AS_NODE", "1");
+        }
+        crate::util::hide_window(&mut cmd);
+        cmd
+    }
+}
+
+/// Por ordem: `ISEP_NODE` (testes); o runtime que vem dentro da app (o Electron, que já traz o Node: o utilizador não instala nada);
+/// e, em desenvolvimento, o `node` do PATH.
+pub fn node_runtime() -> Option<NodeRuntime> {
+    if let Some(v) = std::env::var_os("ISEP_NODE") {
+        return Some(NodeRuntime { exe: PathBuf::from(v), electron: false });
+    }
+    if let Some(res) = paths::embedded_resources() {
+        let app = res.parent()?.join("ISEP Assistant.exe");
+        if app.exists() {
+            return Some(NodeRuntime { exe: app, electron: true });
+        }
+    }
+    which("node").map(|exe| NodeRuntime { exe, electron: false })
+}
+
 pub fn node_path() -> Option<PathBuf> {
-    which("node")
+    node_runtime().map(|n| n.exe)
 }
 
 /// Resolve o nome (DNS) do anfitrião; `false` se não houver rede.

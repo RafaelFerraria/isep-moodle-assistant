@@ -379,3 +379,24 @@ fn scheduled_task_pointing_to_a_missing_program_is_reported() {
     assert_eq!(tasks[0]["target_ok"], false);
     assert_eq!(tasks[0]["target"], "C:\\nao\\existe.bat");
 }
+
+// ---------------------------------------------------------------- tudo dentro da app
+
+#[test]
+fn session_runtime_and_script_can_be_pointed_at_the_embedded_ones() {
+    let home = Home::new();
+    // sem nada configurado, o script é o da pasta de dados (desenvolvimento)
+    std::env::remove_var("ISEP_SESSION_SCRIPT");
+    std::env::remove_var("ISEP_NODE");
+    assert_eq!(isep_assistant::paths::session_script(), home.path("EmailNotifier/session_sender.cjs"));
+
+    std::env::set_var("ISEP_SESSION_SCRIPT", home.path("dentro/da/app.cjs"));
+    std::env::set_var("ISEP_NODE", home.path("runtime/node.exe"));
+    let script = isep_assistant::paths::session_script();
+    let rt = isep_assistant::system::node_runtime().unwrap();
+    std::env::remove_var("ISEP_SESSION_SCRIPT");
+    std::env::remove_var("ISEP_NODE");
+    assert_eq!(script, home.path("dentro/da/app.cjs"));
+    assert_eq!(rt.exe, home.path("runtime/node.exe"));
+    assert!(!rt.electron, "um node explícito não precisa de ELECTRON_RUN_AS_NODE");
+}

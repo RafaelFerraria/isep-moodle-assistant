@@ -80,7 +80,7 @@ pub fn get_status(active_job: Value) -> Value {
         check("thunderbird", "Thunderbird instalado", thunderbird.is_some(),
             if thunderbird.is_some() { "" } else { "Necessário para ler os emails do ISEP." },
             str_or(&config, "email_method", "thunderbird") == "thunderbird"),
-        check("node", "Node.js instalado", system::node_path().is_some(), "Necessário para enviar para o Session.", true),
+        check("node", "Motor do Session (Node.js)", system::node_path().is_some(), "Necessário para enviar para o Session; vem dentro da app.", true),
         check("moodle", "Credenciais do Moodle", mood["configured"].as_bool().unwrap_or(false),
             if mood["configured"].as_bool().unwrap_or(false) { "" } else { "Define o utilizador e a palavra-passe do Moodle." }, false),
         check("tasks", "Tarefas agendadas no Windows", !tasks.is_empty() && !tasks_broken(&tasks),

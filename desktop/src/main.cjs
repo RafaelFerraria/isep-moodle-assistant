@@ -4,21 +4,24 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { httpRequest, startBackend } = require('./backend.cjs')
 
+// Pasta de dados com nome legível (por omissão seria o nome técnico do pacote). As tarefas agendadas guardam este caminho.
+app.setPath('userData', path.join(app.getPath('appData'), 'ISEP Assistant'))
+
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const DEV_URL = process.env.ELECTRON_DEV_URL || null // ex.: http://127.0.0.1:5173 (npm run dev na pasta app)
 
 /**
- * Instalada, a app guarda os dados em %APPDATA%/<app>/data (config, histórico, last_run…) e copia o
- * session_sender.cjs para lá. Em desenvolvimento usa a raiz do repositório, como as instalações Python.
+ * Instalada, a app guarda os dados (config, histórico, last_run…) em %APPDATA%/<app>/data. O resto vem dentro
+ * da app: o servidor, a interface e o script do Session, que corre no próprio Electron (sem Node.js à parte).
+ * Em desenvolvimento usa a raiz do repositório, como as instalações Python.
  */
 function prepareDataRoot() {
   if (!app.isPackaged || process.env.ISEP_ASSISTANT_ROOT) return
   const root = path.join(app.getPath('userData'), 'data')
   for (const d of ['EmailNotifier', 'MoodleSync']) fs.mkdirSync(path.join(root, d), { recursive: true })
-  const src = path.join(process.resourcesPath, 'session', 'session_sender.cjs')
-  const dst = path.join(root, 'EmailNotifier', 'session_sender.cjs')
-  if (fs.existsSync(src) && (!fs.existsSync(dst) || fs.statSync(src).mtimeMs > fs.statSync(dst).mtimeMs)) fs.copyFileSync(src, dst)
   process.env.ISEP_ASSISTANT_ROOT = root
+  // porta e token do servidor ficam com os dados desta instalação: outra instância (uma versão antiga ainda aberta, por exemplo) não os pisa
+  if (!process.env.ISEP_ASSISTANT_STATE) process.env.ISEP_ASSISTANT_STATE = path.join(app.getPath('userData'), 'state')
 }
 
 /** @type {{ child: import('node:child_process').ChildProcess | null, state: { port: number, token: string } | null, error: string | null }} */
@@ -117,7 +120,12 @@ function createWindow() {
         try {
           const text = await win.webContents.executeJavaScript('document.body.innerText')
           fs.writeFileSync(`${out}.txt`, text)
-          fs.writeFileSync(`${out}.png`, (await win.webContents.capturePage()).toPNG())
+          try {
+            fs.writeFileSync(`${out}.png`, (await win.webContents.capturePage()).toPNG())
+          } catch (e) {
+            // sem ecrã disponível (sessão bloqueada, por exemplo): o texto já chega para verificar
+            fs.writeFileSync(`${out}.png.erro`, e.message)
+          }
           app.exit(0)
         } catch (e) {
           fs.writeFileSync(`${out}.txt`, `ERRO: ${e.message}`)
