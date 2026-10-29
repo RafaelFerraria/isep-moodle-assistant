@@ -400,3 +400,24 @@ fn session_runtime_and_script_can_be_pointed_at_the_embedded_ones() {
     assert_eq!(rt.exe, home.path("runtime/node.exe"));
     assert!(!rt.electron, "um node explícito não precisa de ELECTRON_RUN_AS_NODE");
 }
+
+#[cfg(windows)]
+#[test]
+fn microsoft_admin_consent_error_gets_a_clear_message_pointing_to_thunderbird() {
+    let _home = Home::new();
+    let login = fake_server(|req| {
+        if req.url.ends_with("/devicecode") {
+            Reply::json(400, json!({"error": "invalid_request", "error_description": "AADSTS65001: The user or administrator has not consented to use the application."}))
+        } else {
+            Reply::json(400, json!({"error": "access_denied", "error_description": "AADSTS90094: Admin consent is required."}))
+        }
+    });
+    std::env::set_var("ISEP_MS_LOGIN_URL", &login.base);
+    let start = call("POST", "/email/connect/start", None);
+    let poll = call("POST", "/email/connect/poll", Some(json!({"device_code": "x"})));
+    std::env::remove_var("ISEP_MS_LOGIN_URL");
+    assert_eq!(start.status, 502);
+    assert!(start.body["detail"].as_str().unwrap().contains("Thunderbird"), "{}", start.body);
+    assert_eq!(poll.body["status"], "failed");
+    assert!(poll.body["message"].as_str().unwrap().contains("administrador"), "{}", poll.body);
+}

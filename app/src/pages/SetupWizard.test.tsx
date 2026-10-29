@@ -90,3 +90,14 @@ describe('SetupWizard', () => {
     expect(await screen.findByRole('heading', { name: 'De onde vêm os teus emails?' })).toBeInTheDocument()
   })
 })
+
+describe('SetupWizard: origem dos emails', () => {
+  it('recomenda o Thunderbird e avisa que a conta direta pode exigir um administrador', async () => {
+    const mock = new MockTransport()
+    mock.settings.setup.done = false
+    renderWithApi(<SetupWizard onDone={() => {}} />, { mock })
+    const radios = await screen.findAllByRole('radio')
+    expect(radios[0]).toHaveAccessibleName('Thunderbird (recomendado)')
+    expect(screen.getByText(/exigir aprovação de um administrador do ISEP/)).toBeInTheDocument()
+  })
+})

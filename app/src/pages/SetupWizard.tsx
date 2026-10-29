@@ -119,15 +119,15 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
               value={chosenMethod}
               onChange={setMethod}
               options={[
-                { value: 'graph', title: 'Conta do ISEP (recomendado)', description: 'A app liga-se diretamente à tua conta Microsoft. Não precisas do Thunderbird.', icon: <Mail className="size-5" /> },
-                { value: 'thunderbird', title: 'Thunderbird', description: 'Usa o Thunderbird que já tens com a conta do ISEP.', icon: <Mail className="size-5" /> },
+                { value: 'thunderbird', title: 'Thunderbird (recomendado)', description: 'Usa o Thunderbird que já tens com a conta do ISEP. Funciona sem aprovações.', icon: <Mail className="size-5" /> },
+                { value: 'graph', title: 'Conta do ISEP (experimental)', description: 'Liga-se diretamente à conta Microsoft, sem Thunderbird. Pode exigir aprovação de um administrador do ISEP.', icon: <Mail className="size-5" /> },
               ]}
             />
             {chosenMethod === 'graph' ? (
               <EmailConnect connected={s.email.connected} onConnected={() => void settings.reload()} />
             ) : (
               <Notice tone={thunderbirdOk ? 'good' : 'info'}>
-                {thunderbirdOk ? 'Thunderbird encontrado.' : 'Confirma que o Thunderbird está instalado com a conta do ISEP, ou escolhe «Conta do ISEP».'}
+                {thunderbirdOk ? 'Thunderbird encontrado.' : 'Confirma que o Thunderbird está instalado e com a conta do ISEP configurada.'}
               </Notice>
             )}
             <Field label="O teu email do ISEP (opcional)">

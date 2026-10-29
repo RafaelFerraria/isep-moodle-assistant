@@ -38,6 +38,14 @@ fn http() -> Result<HttpClient, String> {
     HttpClient::new(Duration::from_secs(30))
 }
 
+/// O inquilino do ISEP pode exigir que um administrador aprove aplicações de terceiros (AADSTS65001/90094/53003...).
+fn needs_admin(description: &str) -> bool {
+    let d = description.to_lowercase();
+    ["aadsts65001", "aadsts90094", "aadsts900971", "aadsts53003", "aadsts50105", "admin", "consent"].iter().any(|k| d.contains(k))
+}
+
+const ADMIN_MESSAGE: &str = "A Microsoft do ISEP exige a aprovação de um administrador para esta ligação direta. Usa o Thunderbird (não precisa de aprovação).";
+
 fn json_of(resp: &crate::http::Response) -> Value {
     serde_json::from_slice(&resp.body).unwrap_or(Value::Null)
 }
@@ -56,6 +64,9 @@ pub fn start_device_login(config: &Json) -> Result<Value, String> {
     let body = json_of(&resp);
     if resp.status != 200 {
         let why = body["error_description"].as_str().unwrap_or("pedido recusado");
+        if needs_admin(why) {
+            return Err(ADMIN_MESSAGE.into());
+        }
         return Err(format!("A Microsoft recusou o pedido de início de sessão: {}", truncate_chars(why, 200)));
     }
     Ok(json!({
@@ -92,7 +103,10 @@ pub fn poll_device_login(config: &Json, device_code: &str) -> Result<Poll, Strin
         Some("expired_token") | Some("authorization_declined") | Some("bad_verification_code") => {
             Poll::Failed("O código expirou ou a autorização foi recusada. Começa de novo.".into())
         }
-        _ => Poll::Failed(truncate_chars(body["error_description"].as_str().unwrap_or("erro desconhecido"), 200)),
+        _ => {
+            let why = body["error_description"].as_str().unwrap_or("erro desconhecido");
+            Poll::Failed(if needs_admin(why) { ADMIN_MESSAGE.to_string() } else { truncate_chars(why, 200) })
+        }
     })
 }
 

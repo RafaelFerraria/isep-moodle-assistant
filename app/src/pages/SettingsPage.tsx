@@ -231,8 +231,8 @@ function EmailSection({ s, d, set, errors, onConnected }: { s: Settings; d: Draf
           value={d.emailMethod}
           onChange={(emailMethod) => set({ emailMethod })}
           options={[
-            { value: 'graph', title: 'Conta do ISEP (serviço da app)', description: 'Liga-se diretamente à tua conta Microsoft. Não precisa do Thunderbird.', icon: <Mail className="size-5" /> },
-            { value: 'thunderbird', title: 'Thunderbird', description: 'Lê a caixa de entrada do Thunderbird neste PC.', icon: <Mail className="size-5" /> },
+            { value: 'thunderbird', title: 'Thunderbird', description: 'Lê a caixa de entrada do Thunderbird neste PC. Funciona sem aprovações.', icon: <Mail className="size-5" /> },
+            { value: 'graph', title: 'Conta do ISEP (serviço da app)', description: 'Experimental: liga-se à conta Microsoft sem Thunderbird. Pode exigir aprovação de um administrador do ISEP.', icon: <Mail className="size-5" /> },
           ]}
         />
         {errors['email.method'] && <p role="alert" className="text-xs text-rose-600">{errors['email.method']}</p>}
